@@ -1,12 +1,12 @@
 import { z } from 'zod'
 import type { MeetingRequest } from './optimizer'
-import { DAYS, HORIZON, HORIZON_DAYS, PEOPLE, type PersonId } from './types'
+import { DAYS, HORIZON, HORIZON_DAYS, PEOPLE, TEAMMATES, type PersonId, type Teammate } from './types'
 
 /** Shared by the server-side Claude call and the client's type expectations. */
 export const MeetingRequestSchema = z.object({
   title: z.string().describe('Short calendar title, e.g. "Sync with Sofia"'),
   attendees: z
-    .array(z.enum(['sofia', 'marc', 'lena']))
+    .array(z.enum(TEAMMATES))
     .describe('Everyone to invite besides the speaker. Empty if nobody was named.'),
   durationMinutes: z
     .number()
@@ -26,10 +26,7 @@ export type ParsedRequest = z.infer<typeof MeetingRequestSchema>
 
 /** The roster and calendar horizon Claude needs to resolve a spoken request. */
 export const buildSystemPrompt = () => {
-  const roster = Object.entries(PEOPLE)
-    .filter(([id]) => id !== 'you')
-    .map(([id, p]) => `  ${id} = ${p.name}`)
-    .join('\n')
+  const roster = TEAMMATES.map((id) => `  ${id} = ${PEOPLE[id].name}`).join('\n')
   const horizon = HORIZON.map((h) => `  ${h.day} = ${h.label}${h.week === 1 ? ' (next week)' : ' (this week)'}`).join('\n')
 
   return `You turn spoken scheduling requests into structured meeting requests.
@@ -49,7 +46,8 @@ Rules:
   workshop" or "deep dive" means 90.
 - Only choose "morning" or "afternoon" if the speaker actually expressed a
   preference; otherwise "any".
-- Never invent an attendee who was not named.`
+- Never invent an attendee who was not named. Match names loosely — "Mr T",
+  "Mister T" and "mr. t" all mean misterT — but return the id, not the name.`
 }
 
 /** Resolve a parsed request into the optimizer's input shape. */
@@ -71,10 +69,20 @@ export const toMeetingRequest = (p: ParsedRequest): MeetingRequest => ({
  * actually uses so a missing API key, a cold network or a rate limit can't take
  * the feature down mid-presentation. Claude handles everything this misses.
  */
+const NAME_PATTERNS: Record<Teammate, RegExp> = {
+  sofia: /\bsofia\b/,
+  marc: /\bmarc\b/,
+  lena: /\blena\b/,
+  // Speech-to-text renders this any number of ways.
+  misterT: /\b(?:mister|mr\.?)\s*t\b/,
+  laura: /\blaura\b/,
+  nadine: /\bnadine\b/,
+}
+
 export const parseLocally = (text: string): ParsedRequest => {
   const t = text.toLowerCase()
 
-  const attendees = (['sofia', 'marc', 'lena'] as const).filter((n) => t.includes(n))
+  const attendees = TEAMMATES.filter((id) => NAME_PATTERNS[id].test(t))
 
   let durationMinutes = 30
   const mins = t.match(/(\d+)\s*(?:min|minute)/)

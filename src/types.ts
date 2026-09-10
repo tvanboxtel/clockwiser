@@ -6,7 +6,14 @@
  * Google Calendar sync later on.
  */
 
-export type PersonId = 'you' | 'sofia' | 'marc' | 'lena'
+/**
+ * Everyone you can invite. Single source of truth: the Claude output schema,
+ * the local fallback parser and the UI legend all derive from this, so adding
+ * a colleague means editing one line.
+ */
+export const TEAMMATES = ['sofia', 'marc', 'lena', 'misterT', 'laura', 'nadine'] as const
+export type Teammate = (typeof TEAMMATES)[number]
+export type PersonId = 'you' | Teammate
 
 /** `color` is a CSS variable so each theme can retune the roster (see index.css). */
 export const PEOPLE: Record<PersonId, { name: string; color: string }> = {
@@ -14,6 +21,9 @@ export const PEOPLE: Record<PersonId, { name: string; color: string }> = {
   sofia: { name: 'Sofia', color: 'var(--person-sofia)' },
   marc: { name: 'Marc', color: 'var(--person-marc)' },
   lena: { name: 'Lena', color: 'var(--person-lena)' },
+  misterT: { name: 'Mister T', color: 'var(--person-mistert)' },
+  laura: { name: 'Laura', color: 'var(--person-laura)' },
+  nadine: { name: 'Nadine', color: 'var(--person-nadine)' },
 }
 
 export type EventKind = 'external' | 'internal' | 'oneonone' | 'focus' | 'personal'

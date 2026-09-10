@@ -12,10 +12,12 @@ import {
 import { parseLocally, toMeetingRequest, type ParsedRequest } from './intent'
 import { speechSupported, useSpeech } from './useSpeech'
 import { THEMES, useTheme, type ThemeId } from './theme'
+import { Frog } from './Frog'
 import {
   DEFAULT_PREFS,
   HORIZON,
   PEOPLE,
+  TEAMMATES,
   daysInWeek,
   fmt,
   fmtDuration,
@@ -138,6 +140,8 @@ export default function App() {
   const [showTeam, setShowTeam] = useState(false)
   const [running, setRunning] = useState(false)
   const [week, setWeek] = useState(0)
+  // Bumped whenever a run finishes, so the frog has something to cheer about.
+  const [cheer, setCheer] = useState(0)
 
   // --- spoken meeting requests
   const [text, setText] = useState('')
@@ -231,6 +235,7 @@ export default function App() {
       setResult(r)
       setEvents(r.events)
       setRunning(false)
+      setCheer((n) => n + 1)
     })
   }
 
@@ -471,6 +476,10 @@ export default function App() {
               const theirs = dayEvents.filter((e) => !e.attendees.includes('you'))
               const focusBlocks = gapsForDay(events, day, prefs).filter((g) => g.end - g.start >= prefs.minFocusBlock)
               const proposedHere = (proposals ?? []).filter((s) => s.day === day)
+              // One lane per teammate who is busy today, so six people don't
+              // all draw on top of each other in the same strip.
+              const lanes = TEAMMATES.filter((p) => theirs.some((e) => e.attendees[0] === p))
+              const railWidth = showTeam && lanes.length > 0 ? lanes.length * 6 + 2 : 0
 
               return (
                 <div key={day} className="relative border-l border-line" style={{ height: y(prefs.dayEnd, prefs) }}>
@@ -508,18 +517,23 @@ export default function App() {
 
                   {/* teammate-only commitments */}
                   {showTeam &&
-                    theirs.map((e) => (
-                      <div
-                        key={e.id}
-                        className="absolute right-1 w-2 rounded-full opacity-50"
-                        style={{
-                          top: y(e.start, prefs),
-                          height: y(e.start + e.duration, prefs) - y(e.start, prefs),
-                          background: PEOPLE[e.attendees[0] as PersonId]?.color,
-                        }}
-                        title={e.title}
-                      />
-                    ))}
+                    theirs.map((e) => {
+                      const lane = lanes.indexOf(e.attendees[0] as (typeof lanes)[number])
+                      if (lane === -1) return null
+                      return (
+                        <div
+                          key={e.id}
+                          className="absolute w-1 rounded-full opacity-60"
+                          style={{
+                            top: y(e.start, prefs),
+                            height: y(e.start + e.duration, prefs) - y(e.start, prefs),
+                            right: 4 + lane * 6,
+                            background: PEOPLE[e.attendees[0] as PersonId]?.color,
+                          }}
+                          title={`${PEOPLE[e.attendees[0] as PersonId]?.name}: ${e.title}`}
+                        />
+                      )
+                    })}
 
                   {/* your meetings */}
                   {mine.map((e) => {
@@ -528,8 +542,12 @@ export default function App() {
                     return (
                       <div
                         key={e.id}
-                        className={`absolute left-1 ${showTeam ? 'right-4' : 'right-1'} overflow-hidden rounded-lg px-2 py-1 text-[11px] leading-tight backdrop-blur-sm transition-all duration-700 ease-out ${KIND_STYLE[e.kind]} ${e.flexible ? 'border-dashed' : ''} ${moved ? 'ring-2 ring-good' : ''} ${fresh ? 'z-20 ring-2 ring-accent' : ''}`}
-                        style={{ top: y(e.start, prefs), height: Math.max(20, y(e.start + e.duration, prefs) - y(e.start, prefs) - 2) }}
+                        className={`absolute left-1 overflow-hidden rounded-lg px-2 py-1 text-[11px] leading-tight backdrop-blur-sm transition-all duration-700 ease-out ${KIND_STYLE[e.kind]} ${e.flexible ? 'border-dashed' : ''} ${moved ? 'ring-2 ring-good' : ''} ${fresh ? 'z-20 ring-2 ring-accent' : ''}`}
+                        style={{
+                          top: y(e.start, prefs),
+                          height: Math.max(20, y(e.start + e.duration, prefs) - y(e.start, prefs) - 2),
+                          right: railWidth + 4,
+                        }}
                         title={`${e.title} · ${fmt(e.start)}–${fmt(e.start + e.duration)} · ${e.attendees.map((a) => PEOPLE[a].name).join(', ')}`}
                       >
                         <div className="flex items-center gap-1 font-semibold">
@@ -556,6 +574,8 @@ export default function App() {
           ))}
         </div>
       </div>
+
+      <Frog cheer={cheer} />
     </div>
   )
 }
