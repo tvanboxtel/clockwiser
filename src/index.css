@@ -121,43 +121,43 @@
   --ev-personal-fg: #334155;
 }
 
-/* --- pastel: light, but on tinted lilac paper with candy event chips */
+/* --- pastel: light, on tinted pond-green paper with candy event chips */
 :root[data-theme='pastel'] {
   color-scheme: light;
 
-  --canvas: #f3ecfd;
-  --panel: #fffcff;
-  --panel-soft: #ece1fa;
-  --line: rgba(124, 101, 180, 0.22);
-  --line-soft: rgba(124, 101, 180, 0.09);
-  --hover: rgba(124, 101, 180, 0.07);
+  --canvas: #eaf7ee;
+  --panel: #fbfffc;
+  --panel-soft: #dcf1e3;
+  --line: rgba(52, 122, 88, 0.22);
+  --line-soft: rgba(52, 122, 88, 0.1);
+  --hover: rgba(52, 122, 88, 0.08);
 
-  --fg: #3b2f63;
-  --body: #5b5178;
-  --muted: #7a6f99;
-  --subtle: #a29ab8;
+  --fg: #1e4635;
+  --body: #3d6553;
+  --muted: #628375;
+  --subtle: #93b1a2;
 
-  --accent: #c4b5fd;
-  --accent-hover: #b3a1fb;
-  --accent-fg: #3b2f63;
-  --accent-glow: rgba(167, 139, 250, 0.35);
+  --accent: #7ddba4;
+  --accent-hover: #63cf90;
+  --accent-fg: #12402c;
+  --accent-glow: rgba(99, 207, 144, 0.4);
 
   --good: #1f8a63;
   --bad: #d13c5c;
   --warn: #a86a1c;
 
-  --lunch: rgba(251, 191, 36, 0.16);
-  --focus-bg: rgba(94, 214, 170, 0.18);
-  --focus-line: rgba(94, 190, 155, 0.5);
-  --focus-fg: #1f7a5c;
+  --lunch: rgba(245, 176, 65, 0.2);
+  --focus-bg: rgba(45, 190, 130, 0.16);
+  --focus-line: rgba(40, 165, 115, 0.5);
+  --focus-fg: #14684b;
 
-  --person-you: #a78bfa;
+  --person-you: #2fae74;
   --person-sofia: #f472b6;
   --person-marc: #fbbf24;
-  --person-lena: #5eddb0;
-  --person-mistert: #67e8f9;
+  --person-lena: #818cf8;
+  --person-mistert: #22d3ee;
   --person-laura: #d8b4fe;
-  --person-nadine: #bef264;
+  --person-nadine: #fb923c;
 
   --ev-external-bg: #ffdbe7;
   --ev-external-line: #ffaec8;
@@ -171,9 +171,9 @@
   --ev-focus-bg: #cdf5e2;
   --ev-focus-line: #94e6c1;
   --ev-focus-fg: #1b7355;
-  --ev-personal-bg: #e6eaf6;
-  --ev-personal-line: #ccd3e8;
-  --ev-personal-fg: #4d5570;
+  --ev-personal-bg: #e4ede8;
+  --ev-personal-line: #c9dbd1;
+  --ev-personal-fg: #4a6459;
 }
 
 @theme inline {
@@ -256,13 +256,13 @@ body {
 }
 
 :root[data-theme='pastel'] {
-  --frog-body: #86e3ac;
-  --frog-body-dark: #5fc98d;
-  --frog-belly: #f3fff8;
-  --frog-eye: #3b2f63;
-  --frog-eye-white: #fffcff;
+  --frog-body: #5ecb8d;
+  --frog-body-dark: #3aab6f;
+  --frog-belly: #eafff2;
+  --frog-eye: #123a28;
+  --frog-eye-white: #fbfffc;
   --frog-cheek: rgba(244, 114, 182, 0.45);
-  --frog-line: #2f7a56;
+  --frog-line: #14603d;
 }
 
 .frog-wrap {
@@ -392,4 +392,72 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .just-booked { animation: none; box-shadow: 0 0 12px 1px var(--accent); }
+}
+
+/* --- the frog is the microphone -------------------------------------------
+   Ripples spreading out from where he sits: a pond tell that he's listening,
+   without a red dot anywhere near him. */
+.frog-ripple {
+  position: absolute;
+  left: 50%;
+  bottom: 0.35rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  margin-left: -1.75rem;
+  border-radius: 9999px;
+  border: 2px solid var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  animation: frog-ripple 1.9s ease-out infinite;
+}
+.frog-ripple::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 2px solid var(--accent);
+  animation: frog-ripple 1.9s ease-out infinite;
+  animation-delay: 0.95s;
+}
+
+.frog-wrap-listening .frog {
+  filter: drop-shadow(0 0 14px var(--accent-glow)) drop-shadow(0 6px 10px rgba(0, 0, 0, 0.28));
+}
+
+/* Same place as his croak, but it stays put and wraps — a transcript is a
+   sentence, not an interjection. */
+.frog-hear {
+  position: absolute;
+  right: 100%;
+  bottom: 45%;
+  margin-right: 0.5rem;
+  max-width: 17rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--accent);
+  background: var(--panel);
+  padding: 0.4rem 0.7rem;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--body);
+  text-align: right;
+  box-shadow: 0 10px 24px -12px var(--accent-glow);
+}
+
+@keyframes frog-ripple {
+  0% { transform: scale(0.55); opacity: 0.75; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+
+/* Twice his usual size, for the onboarding screen. */
+.onboard-frog {
+  display: block;
+  transform: scale(1.15);
+  transform-origin: top left;
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.18));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .frog-ripple,
+  .frog-ripple::after { animation: none; opacity: 0.5; }
 }

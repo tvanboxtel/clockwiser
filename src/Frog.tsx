@@ -3,10 +3,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 /**
  * A small frog who lives in the bottom-right corner.
  *
- * He is purely decorative: he breathes, blinks, hops along the bottom of the
- * page every so often, and croaks when you poke him. Colours come from the
- * `--frog-*` variables in index.css so he re-skins with the theme, and every
- * animation is switched off under `prefers-reduced-motion`.
+ * He breathes, blinks, hops along the bottom of the page every so often, and
+ * croaks when you poke him — and he is also the microphone: talking to him is
+ * how you ask for a meeting or tell him how you like your week. Colours come
+ * from the `--frog-*` variables in index.css so he re-skins with the theme,
+ * and every animation is switched off under `prefers-reduced-motion`.
  */
 
 const RIBBITS = ['ribbit', 'ribbit ribbit', 'brrp', 'croak', 'mrrp?']
@@ -35,7 +36,24 @@ const reducedMotion = () =>
 
 const pick = (xs: string[]) => xs[Math.floor(Math.random() * xs.length)]
 
-export function Frog({ cheer = 0, perch = null }: { cheer?: number; perch?: Perch | null }) {
+export function Frog({
+  cheer = 0,
+  perch = null,
+  listening = false,
+  heard = '',
+  canHear = false,
+  onTalk,
+}: {
+  cheer?: number
+  perch?: Perch | null
+  /** True while the recogniser is running, for the ripples and the ear bubble. */
+  listening?: boolean
+  /** Live transcript, shown in his bubble as you speak. */
+  heard?: string
+  /** False when the browser has no speech recognition — he's decorative then. */
+  canHear?: boolean
+  onTalk?: () => void
+}) {
   // Bumping `hop` restarts the hop animation by remounting the animated node.
   const [hop, setHop] = useState(0)
   const [x, setX] = useState(0)
@@ -45,6 +63,10 @@ export function Frog({ cheer = 0, perch = null }: { cheer?: number; perch?: Perc
   const wrapRef = useRef<HTMLDivElement | null>(null)
   // While he's sitting on a meeting, the idle wander leaves him alone.
   const perching = useRef(false)
+  // Wandering off mid-sentence drags his speech bubble across the page, so he
+  // sits still while he's listening.
+  const hold = useRef(false)
+  hold.current = listening
   // Mirrors the rendered transform. Effects read this instead of taking `x`
   // and `lift` as dependencies, which would re-run them on every hop and tear
   // down their timers.
@@ -74,7 +96,7 @@ export function Frog({ cheer = 0, perch = null }: { cheer?: number; perch?: Perc
     let timer = 0
     const schedule = () => {
       timer = window.setTimeout(() => {
-        if (perching.current) {
+        if (perching.current || hold.current) {
           schedule()
           return
         }
@@ -98,6 +120,15 @@ export function Frog({ cheer = 0, perch = null }: { cheer?: number; perch?: Perc
     jump(70)
     speak(pick(CHEERS))
   }, [cheer, jump, speak])
+
+  // Come back to his spot when you start talking: mid-wander his transcript
+  // bubble opens to the left and would run off the edge of the page.
+  const wasListening = useRef(listening)
+  useEffect(() => {
+    if (listening === wasListening.current) return
+    wasListening.current = listening
+    if (listening && !perching.current && posRef.current.x !== 0) jump(-posRef.current.x)
+  }, [listening, jump])
 
   // Leap onto a newly booked meeting, sit on it a moment, then hop home.
   const seenPerch = useRef(0)
@@ -132,20 +163,46 @@ export function Frog({ cheer = 0, perch = null }: { cheer?: number; perch?: Perc
   return (
     <div
       ref={wrapRef}
-      className="frog-wrap"
+      className={`frog-wrap${listening ? ' frog-wrap-listening' : ''}`}
       style={{ transform: `translate(${x}px, ${lift}px)` }}
-      aria-hidden
     >
-      {say && (
-        <span key={say.id} className="frog-say" onAnimationEnd={() => setSay(null)}>
-          {say.text}
+      {/* Listening beats a one-off croak: the live transcript replaces it. */}
+      {listening ? (
+        <span className="frog-hear" aria-live="polite">
+          {heard || 'listening…'}
         </span>
+      ) : (
+        say && (
+          <span key={say.id} className="frog-say" onAnimationEnd={() => setSay(null)}>
+            {say.text}
+          </span>
+        )
       )}
+      {listening && <span className="frog-ripple" aria-hidden />}
       <button
         type="button"
         className="frog"
-        title="frog"
+        aria-label={
+          !canHear
+            ? 'A frog. Speech input needs Chrome — type your request instead.'
+            : listening
+              ? 'Stop listening'
+              : 'Talk to the frog'
+        }
+        aria-pressed={canHear ? listening : undefined}
+        title={
+          !canHear
+            ? 'Speech input needs Chrome — type it instead'
+            : listening
+              ? 'Listening… click when you\u2019re done'
+              : 'Talk to me — ask for a meeting, or tell me how you like your week'
+        }
         onClick={() => {
+          // Poking a frog who can't hear you should still get you a ribbit.
+          if (canHear && onTalk) {
+            onTalk()
+            return
+          }
           jump(Math.random() < 0.5 ? -55 : 55)
           speak(pick(RIBBITS))
         }}
@@ -158,9 +215,10 @@ export function Frog({ cheer = 0, perch = null }: { cheer?: number; perch?: Perc
   )
 }
 
-function FrogSvg() {
+/** Also used at twice the size on the onboarding screen. */
+export function FrogSvg() {
   return (
-    <svg width="56" height="50" viewBox="0 0 64 56" fill="none">
+    <svg width="56" height="50" viewBox="0 0 64 56" fill="none" aria-hidden>
       {/* back feet, planted */}
       <ellipse cx="15" cy="50" rx="9" ry="4" fill="var(--frog-body-dark)" />
       <ellipse cx="49" cy="50" rx="9" ry="4" fill="var(--frog-body-dark)" />

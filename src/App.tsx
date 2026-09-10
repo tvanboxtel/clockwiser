@@ -18,6 +18,8 @@ import {
   type ParsedRequest,
 } from './intent'
 import { speechSupported, useSpeech } from './useSpeech'
+import { Onboarding } from './Onboarding'
+import { PrefsGrid } from './PrefsQuestions'
 import { THEMES, useTheme, type ThemeId } from './theme'
 import { Frog, type Perch } from './Frog'
 import {
@@ -45,83 +47,30 @@ const KIND_STYLE: Record<string, string> = {
   personal: 'ev ev-personal',
 }
 
+/** Short labels, real sentences — the box takes bookings and preferences. */
 const EXAMPLES = [
-  'I need 30 minutes with Sofia in the morning sometime in the next two weeks',
-  'Book an hour with Marc and Lena next week, afternoons only',
-  'Quick chat with Lena on Thursday',
-]
-
-/** The same box also takes preferences, so show people that it does. */
-const TUNE_EXAMPLES = [
-  'I want some breaks after my long meetings, help me optimize my calendar for that',
-  'Protect my mornings and get me finished by 5',
-  'Give me two-hour focus blocks, 30 minutes to breathe after anything over an hour',
+  { chip: '30 min with Sofia', say: 'I need 30 minutes with Sofia in the morning sometime in the next two weeks' },
+  { chip: 'An hour with Marc & Lena', say: 'Book an hour with Marc and Lena next week, afternoons only' },
+  { chip: 'Breaks after long meetings', say: 'I want some breaks after my long meetings, help me optimize my calendar for that' },
+  { chip: 'Protect my mornings', say: 'Protect my mornings and get me finished by 5' },
 ]
 
 /**
- * The questions Optimize asks before it rearranges anything. Each one maps to
- * a single preference, which is what keeps this honest: every answer visibly
- * changes a constraint the optimizer has to respect.
+ * Preferences are answered once at onboarding and remembered, so the demo
+ * doesn't interrogate you on every reload.
  */
-const QUESTIONS: Array<{
-  q: string
-  field: keyof Prefs
-  opts: Array<{ label: string; value: number | boolean }>
-}> = [
-  {
-    q: 'Breathing room after a long meeting?',
-    field: 'breakAfterLongMeetings',
-    opts: [
-      { label: 'None', value: 0 },
-      { label: '15 min', value: 15 },
-      { label: '30 min', value: 30 },
-    ],
-  },
-  {
-    q: 'A meeting is “long” from…',
-    field: 'longMeetingMinutes',
-    opts: [
-      { label: '45 min', value: 45 },
-      { label: '1 hr', value: 60 },
-      { label: '1 hr 30', value: 90 },
-    ],
-  },
-  {
-    q: 'Earliest a meeting may start',
-    field: 'noMeetingsBefore',
-    opts: [
-      { label: '9:00', value: 9 * 60 },
-      { label: '10:00', value: 10 * 60 },
-      { label: '11:00', value: 11 * 60 },
-    ],
-  },
-  {
-    q: 'Your day ends at',
-    field: 'dayEnd',
-    opts: [
-      { label: '17:00', value: 17 * 60 },
-      { label: '18:00', value: 18 * 60 },
-      { label: '19:00', value: 19 * 60 },
-    ],
-  },
-  {
-    q: 'Shortest block worth having',
-    field: 'minFocusBlock',
-    opts: [
-      { label: '1 hr', value: 60 },
-      { label: '1 hr 30', value: 90 },
-      { label: '2 hr', value: 120 },
-    ],
-  },
-  {
-    q: 'May meetings move to another day?',
-    field: 'allowDayChange',
-    opts: [
-      { label: 'Yes', value: true },
-      { label: 'No', value: false },
-    ],
-  },
-]
+const PREFS_KEY = 'clockwiser:prefs'
+
+const loadPrefs = (): { prefs: Prefs; onboarded: boolean } => {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY)
+    if (!raw) return { prefs: DEFAULT_PREFS, onboarded: false }
+    // Merge over the defaults so a preference added later doesn't arrive undefined.
+    return { prefs: { ...DEFAULT_PREFS, ...(JSON.parse(raw) as Partial<Prefs>) }, onboarded: true }
+  } catch {
+    return { prefs: DEFAULT_PREFS, onboarded: false }
+  }
+}
 
 /** Tweens a number so the headline stat visibly climbs when you optimize. */
 function useTween(value: number, ms = 700) {
@@ -210,88 +159,52 @@ function Chip({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Optimizing somebody's week without asking them anything is a guess. This is
- * the smallest set of questions whose answers actually change the result.
+ * The same questions the onboarding asks, reachable forever after. A popover
+ * rather than a panel in the flow: preferences are occasional, and the main
+ * screen has enough on it.
  */
-function TunePanel({
+function PrefsPopover({
   prefs,
   setPrefs,
   onRun,
-  onDismiss,
-  onExample,
+  onReset,
+  onClose,
   running,
 }: {
   prefs: Prefs
   setPrefs: (p: Prefs) => void
   onRun: () => void
-  onDismiss: () => void
-  onExample: (text: string) => void
+  onReset: () => void
+  onClose: () => void
   running: boolean
 }) {
   return (
-    <div className="mt-4 rounded-2xl border border-accent/40 bg-panel p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+    <div className="absolute right-0 top-full z-40 mt-2 w-[min(92vw,34rem)] rounded-2xl border border-line bg-panel p-5 shadow-[0_24px_50px_-20px_rgba(0,0,0,0.35)]">
+      <div className="flex items-baseline justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-fg">First — how do you like your week?</h2>
-          <p className="mt-0.5 text-xs text-muted">
-            Every answer is a hard constraint, not a hint. Change one and the plan changes with it.
-          </p>
+          <h2 className="text-sm font-semibold text-fg">How you like your week</h2>
+          <p className="mt-0.5 text-[11px] text-muted">Hard constraints, not hints. Change one and the plan changes.</p>
         </div>
-        <button onClick={onDismiss} className="text-xs text-subtle transition hover:text-body">
-          Hide
+        <button onClick={onClose} className="text-xs text-subtle transition hover:text-body">
+          Close
         </button>
       </div>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {QUESTIONS.map((q) => {
-          // Asking what counts as "long" is noise until breaks are switched on.
-          const moot = q.field === 'longMeetingMinutes' && prefs.breakAfterLongMeetings === 0
-          return (
-            <div key={q.field} className={`rounded-xl border border-line bg-panel-soft px-3 py-2.5 transition ${moot ? 'opacity-45' : ''}`}>
-              <div className="text-[11px] font-medium text-muted">{q.q}</div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {q.opts.map((o) => {
-                  const active = prefs[q.field] === o.value
-                  return (
-                    <button
-                      key={String(o.value)}
-                      disabled={moot}
-                      aria-pressed={active}
-                      // The field/value pairing is checked in QUESTIONS above;
-                      // the spread just can't prove it to the compiler.
-                      onClick={() => setPrefs({ ...prefs, [q.field]: o.value } as Prefs)}
-                      className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-                        active ? 'bg-accent text-accent-fg' : 'bg-hover text-muted hover:text-body'
-                      }`}
-                    >
-                      {o.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )
-        })}
+      <div className="mt-4">
+        <PrefsGrid prefs={prefs} setPrefs={setPrefs} />
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="mt-4 flex items-center gap-3 border-t border-line pt-4">
+        <button onClick={onReset} className="text-[11px] text-subtle transition hover:text-body">
+          Reset the demo calendar
+        </button>
         <button
           onClick={onRun}
           disabled={running}
-          className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-fg shadow-[0_10px_22px_-8px_var(--accent-glow)] transition hover:bg-accent-hover disabled:opacity-60"
+          className="ml-auto rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-fg transition hover:bg-accent-hover disabled:opacity-60"
         >
-          {running ? 'Optimizing…' : 'Optimize my weeks'}
+          {running ? 'Optimizing…' : 'Optimize with these'}
         </button>
-        <span className="text-[11px] text-subtle">or just say it:</span>
-        {TUNE_EXAMPLES.map((ex) => (
-          <button
-            key={ex}
-            onClick={() => onExample(ex)}
-            className="rounded-md bg-panel-soft px-2 py-1 text-[11px] text-muted transition hover:bg-hover hover:text-body"
-          >
-            “{ex.length > 46 ? `${ex.slice(0, 44)}…` : ex}”
-          </button>
-        ))}
       </div>
     </div>
   )
@@ -299,7 +212,10 @@ function TunePanel({
 
 export default function App() {
   const { theme, setTheme } = useTheme()
-  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS)
+  // Read once: a first visit gets the onboarding, a return visit gets its answers.
+  const saved = useRef(loadPrefs())
+  const [prefs, setPrefs] = useState<Prefs>(saved.current.prefs)
+  const [onboarding, setOnboarding] = useState(!saved.current.onboarded)
   const [events, setEvents] = useState<CalEvent[]>(loadDemoWeek)
   // Stateful, because booking a meeting has to survive a later Optimize.
   const [baseline, setBaseline] = useState<CalEvent[]>(loadDemoWeek)
@@ -318,9 +234,7 @@ export default function App() {
   const [thinking, setThinking] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [justBooked, setJustBooked] = useState<string | null>(null)
-  // Optimize asks its questions once; after that the button just runs.
-  const [tuneOpen, setTuneOpen] = useState(false)
-  const [tuned, setTuned] = useState(false)
+  const [prefsOpen, setPrefsOpen] = useState(false)
   const [tuneNote, setTuneNote] = useState<string | null>(null)
   const [perch, setPerch] = useState<Perch | null>(null)
   const bookedElRef = useRef<HTMLDivElement | null>(null)
@@ -336,6 +250,17 @@ export default function App() {
   const focusShown = useTween(current.focusTime)
   const proposedDuration = parsed ? toMeetingRequest(parsed).durationMinutes : 30
 
+  // Remember the answers, but only once they've actually been given — writing
+  // the defaults early would make the next visit look like a return visit.
+  useEffect(() => {
+    if (onboarding) return
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
+    } catch {
+      // Private browsing, a full quota — not worth breaking the app over.
+    }
+  }, [prefs, onboarding])
+
   /**
    * Optimize with an explicit set of preferences rather than whatever is in
    * state — applying a spoken preference and re-optimizing happen in the same
@@ -350,7 +275,6 @@ export default function App() {
         setResult(r)
         setEvents(r.events)
         setRunning(false)
-        setTuned(true)
         setCheer((n) => n + 1)
       })
     },
@@ -397,7 +321,6 @@ export default function App() {
         // Prefer Claude's own sentence, but never trust it over the diff we
         // actually applied — the clamps in applyTune can overrule it.
         setTuneNote(`${intent.tune.summary?.trim() || 'Got it.'} → ${describeTune(prefs, next)}`)
-        setTuneOpen(true)
         run(next)
         return
       }
@@ -496,9 +419,6 @@ export default function App() {
     setParsed(null)
     setText('')
     setTuneNote(null)
-    setPrefs(DEFAULT_PREFS)
-    setTuned(false)
-    setTuneOpen(false)
   }
 
   const hours: number[] = []
@@ -507,105 +427,95 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-canvas text-body">
-      <div className="mx-auto max-w-[1400px] px-6 py-6">
+      {onboarding && (
+        <Onboarding
+          prefs={prefs}
+          setPrefs={setPrefs}
+          onDone={(skipped) => {
+            setOnboarding(false)
+            // "Clean my pond" is a request, not just a dialog dismissal.
+            if (!skipped) run(prefs)
+          }}
+        />
+      )}
+
+      <div className="mx-auto max-w-[1400px] px-6 py-8 sm:px-8">
         {/* ---- header */}
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold text-fg">
-              Clockwiser <span className="font-normal text-subtle">· focus time, defragmented</span>
-            </h1>
-            <p className="mt-1 text-sm text-muted">
-              Fixed meetings stay put. Flexible ones get rearranged around everyone's real availability.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold text-fg">
+            Clockwiser <span className="font-normal text-subtle">· focus time, defragmented</span>
+          </h1>
+          <div className="relative flex items-center gap-2">
             <ThemeSwitch theme={theme} setTheme={setTheme} />
             <button
-              onClick={reset}
-              className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-body transition hover:bg-hover"
-            >
-              Reset
-            </button>
-            <button
-              onClick={() => setTuneOpen((v) => !v)}
-              aria-expanded={tuneOpen}
+              onClick={() => setPrefsOpen((v) => !v)}
+              aria-expanded={prefsOpen}
               className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
-                tuneOpen ? 'border-accent text-fg' : 'border-line text-body hover:bg-hover'
+                prefsOpen ? 'border-accent text-fg' : 'border-line text-body hover:bg-hover'
               }`}
             >
               Preferences
             </button>
             <button
-              // First run asks the questions instead of guessing at them.
-              onClick={() => (tuned || tuneOpen ? run() : setTuneOpen(true))}
+              onClick={() => run()}
               disabled={running}
               className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-fg shadow-[0_10px_22px_-8px_var(--accent-glow)] transition hover:bg-accent-hover disabled:opacity-60"
             >
-              {running ? 'Optimizing…' : tuned ? 'Optimize my weeks' : 'Optimize my weeks…'}
+              {running ? 'Optimizing…' : 'Optimize my weeks'}
             </button>
+
+            {prefsOpen && (
+              <PrefsPopover
+                prefs={prefs}
+                setPrefs={setPrefs}
+                onRun={() => { setPrefsOpen(false); run() }}
+                onReset={() => { setPrefsOpen(false); reset() }}
+                onClose={() => setPrefsOpen(false)}
+                running={running}
+              />
+            )}
           </div>
         </div>
 
-        {/* ---- how do you want the week optimized */}
-        {tuneOpen && (
-          <TunePanel
-            prefs={prefs}
-            setPrefs={setPrefs}
-            onRun={() => run()}
-            onDismiss={() => setTuneOpen(false)}
-            onExample={(ex) => { setText(ex); void handleInput(ex) }}
-            running={running}
-          />
-        )}
-
-        {/* ---- ask for a meeting */}
-        <div className="mt-5 rounded-2xl border border-line bg-panel p-4">
+        {/* ---- ask for a meeting, or for a different kind of week */}
+        <div className="mt-6 rounded-2xl border border-line bg-panel p-5">
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={listening ? stop : start}
-              disabled={!speechSupported()}
-              aria-label={listening ? 'Stop listening' : 'Speak a meeting request'}
-              title={speechSupported() ? 'Speak a meeting request' : 'No speech recognition in this browser — type it instead'}
-              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-lg transition disabled:opacity-40 ${
-                listening ? 'animate-pulse bg-bad text-canvas' : 'bg-hover text-body hover:bg-panel-soft'
-              }`}
-            >
-              {listening ? '■' : '🎙'}
-            </button>
             <input
               value={listening && interim ? interim : text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void handleInput(text)}
-              placeholder={EXAMPLES[0]}
-              className="min-w-[280px] flex-1 rounded-lg border border-line bg-panel-soft px-3 py-2.5 text-sm text-fg placeholder:text-subtle focus:border-accent focus:outline-none"
+              placeholder={
+                speechSupported()
+                  ? 'Ask for a meeting, or talk to the frog in the corner →'
+                  : 'Ask for a meeting, or tell me how you like your week'
+              }
+              className="min-w-[280px] flex-1 rounded-lg border border-line bg-panel-soft px-3.5 py-3 text-sm text-fg placeholder:text-subtle focus:border-accent focus:outline-none"
             />
             <button
               onClick={() => void handleInput(text)}
               disabled={thinking || !text.trim()}
-              className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg transition hover:bg-accent-hover disabled:opacity-40"
+              className="rounded-lg bg-accent px-5 py-3 text-sm font-semibold text-accent-fg transition hover:bg-accent-hover disabled:opacity-40"
             >
-              {thinking ? 'Thinking…' : 'Find a slot'}
+              {thinking ? 'Thinking…' : 'Go'}
             </button>
           </div>
 
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-subtle">
-            {listening ? (
-              <span className="font-semibold text-bad">Listening…</span>
-            ) : (
-              <>
-                <span>Try:</span>
-                {EXAMPLES.map((ex) => (
-                  <button
-                    key={ex}
-                    onClick={() => { setText(ex); void handleInput(ex) }}
-                    className="rounded-md bg-panel-soft px-2 py-1 text-muted transition hover:bg-hover hover:text-body"
-                  >
-                    {ex}
-                  </button>
-                ))}
-              </>
-            )}
-          </div>
+          {/* Examples only until you've actually used it — then they're noise. */}
+          {!parsed && !tuneNote && !listening && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-subtle">
+              <span>Try:</span>
+              {EXAMPLES.map((ex) => (
+                <button
+                  key={ex.chip}
+                  onClick={() => { setText(ex.say); void handleInput(ex.say) }}
+                  title={ex.say}
+                  className="rounded-md bg-panel-soft px-2.5 py-1 text-muted transition hover:bg-hover hover:text-body"
+                >
+                  {ex.chip}
+                </button>
+              ))}
+            </div>
+          )}
 
           {(micError || notice) && (
             <div className="mt-2 text-[11px] text-warn">
@@ -681,8 +591,8 @@ export default function App() {
           )}
         </div>
 
-        {/* ---- stats */}
-        <div className={`mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 ${prefs.breakAfterLongMeetings > 0 ? 'lg:grid-cols-6' : 'lg:grid-cols-5'}`}>
+        {/* ---- stats: three that matter, the rest kept quiet */}
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Stat
             label="Usable focus time"
             value={fmtDuration(Math.round(focusShown / 5) * 5)}
@@ -691,58 +601,47 @@ export default function App() {
           />
           <Stat label="Longest block" value={fmtDuration(current.longestBlock)} good="up" />
           <Stat label="Dead fragments" value={String(current.fragments)} delta={before ? current.fragments - before.fragments : undefined} good="down" />
-          <Stat label="Before 10:00" value={String(current.earlyMeetings)} delta={before ? current.earlyMeetings - before.earlyMeetings : undefined} good="down" />
-          <Stat label="Lunch clashes" value={String(current.lunchClashes)} delta={before ? current.lunchClashes - before.lunchClashes : undefined} good="down" />
+        </div>
+
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 px-1 text-[11px] text-subtle">
+          <span>
+            {current.earlyMeetings} before {fmt(prefs.noMeetingsBefore)}
+          </span>
+          <span>{current.lunchClashes} over lunch</span>
           {prefs.breakAfterLongMeetings > 0 && (
-            <Stat
-              label="No room to breathe"
-              value={String(current.tightTurnarounds)}
-              delta={before ? current.tightTurnarounds - before.tightTurnarounds : undefined}
-              good="down"
-            />
+            <span>
+              {current.tightTurnarounds} with no room to breathe
+              {before && before.tightTurnarounds !== current.tightTurnarounds && (
+                <span className="text-good"> (was {before.tightTurnarounds})</span>
+              )}
+            </span>
+          )}
+          {result && (
+            <span className="ml-auto">
+              moved <span className="font-semibold text-body">{result.moved}</span> of{' '}
+              {baseline.filter((e) => e.flexible && e.attendees.includes('you')).length} flexible meetings
+              {result.stuck.length > 0 && <span className="text-warn"> · {result.stuck.length} had nowhere to go</span>}
+            </span>
           )}
         </div>
 
-        {/* ---- controls */}
-        <div className="mt-4 flex flex-wrap items-center gap-4 rounded-xl border border-line bg-panel px-4 py-3 text-sm">
+        {/* ---- controls: the two that change what you're looking at */}
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 text-sm">
           <div className="flex overflow-hidden rounded-lg border border-line">
             {[0, 1].map((w) => (
               <button
                 key={w}
                 onClick={() => setWeek(w)}
-                className={`px-3 py-1.5 text-xs font-semibold transition ${week === w ? 'bg-accent text-accent-fg' : 'text-muted hover:bg-hover'}`}
+                className={`px-4 py-2 text-xs font-semibold transition ${week === w ? 'bg-accent text-accent-fg' : 'text-muted hover:bg-hover'}`}
               >
                 {w === 0 ? 'This week' : 'Next week'}
               </button>
             ))}
           </div>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={prefs.allowDayChange} onChange={(e) => setPrefs({ ...prefs, allowDayChange: e.target.checked })} className="accent-accent" />
-            Move across days
-          </label>
-          <label className="flex items-center gap-2">
+          <label className="flex items-center gap-2 text-xs text-muted">
             <input type="checkbox" checked={showTeam} onChange={(e) => setShowTeam(e.target.checked)} className="accent-accent" />
             Show teammate availability
           </label>
-          <label className="flex items-center gap-2">
-            Min focus block
-            <select
-              value={prefs.minFocusBlock}
-              onChange={(e) => setPrefs({ ...prefs, minFocusBlock: Number(e.target.value) })}
-              className="rounded-md border border-line bg-panel-soft px-2 py-1 text-body"
-            >
-              {[60, 90, 120, 180].map((v) => (
-                <option key={v} value={v} className="bg-canvas text-body">{fmtDuration(v)}</option>
-              ))}
-            </select>
-          </label>
-          {result && (
-            <span className="ml-auto text-muted">
-              moved <span className="font-semibold text-fg">{result.moved}</span> of{' '}
-              {baseline.filter((e) => e.flexible && e.attendees.includes('you')).length} flexible meetings
-              {result.stuck.length > 0 && <span className="text-warn"> · {result.stuck.length} had nowhere to go</span>}
-            </span>
-          )}
         </div>
 
         {/* ---- calendar */}
@@ -871,7 +770,14 @@ export default function App() {
         </div>
       </div>
 
-      <Frog cheer={cheer} perch={perch} />
+      <Frog
+        cheer={cheer}
+        perch={perch}
+        listening={listening}
+        heard={interim}
+        canHear={speechSupported()}
+        onTalk={listening ? stop : start}
+      />
     </div>
   )
 }
