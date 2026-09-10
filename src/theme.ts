@@ -20,8 +20,13 @@ export const STORAGE_KEY = 'clockwiser:theme'
 
 const isTheme = (v: unknown): v is ThemeId => THEMES.some((t) => t.id === v)
 
-/** Stored choice, else whatever the OS asks for. */
+/**
+ * `?theme=pastel` wins (handy for demoing or sharing a link in a fixed theme),
+ * then the stored choice, then whatever the OS asks for.
+ */
 export function initialTheme(): ThemeId {
+  const fromUrl = new URLSearchParams(window.location.search).get('theme')
+  if (isTheme(fromUrl)) return fromUrl
   const stored = localStorage.getItem(STORAGE_KEY)
   if (isTheme(stored)) return stored
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'

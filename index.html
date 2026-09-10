@@ -9,7 +9,9 @@
       // Apply the saved theme before first paint so reloads don't flash the
       // default palette. Keep the key in sync with STORAGE_KEY in src/theme.ts.
       try {
-        var t = localStorage.getItem('clockwiser:theme')
+        var t =
+          new URLSearchParams(location.search).get('theme') ||
+          localStorage.getItem('clockwiser:theme')
         document.documentElement.dataset.theme =
           t === 'dark' || t === 'light' || t === 'pastel'
             ? t
