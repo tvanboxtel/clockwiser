@@ -1,4 +1,4 @@
-import type { CalEvent, PersonId, Prefs } from './types'
+import { HORIZON_DAYS, daysInWeek, weekOf, type CalEvent, type PersonId, type Prefs } from './types'
 
 interface Interval {
   start: number
@@ -13,9 +13,14 @@ const busyFor = (person: PersonId, events: CalEvent[], day: number): Interval[] 
     .map((e) => ({ start: e.start, end: e.start + e.duration }))
     .sort((x, y) => x.start - y.start)
 
-/** Free gaps in `you`'s day, inside working hours. */
-export const gapsForDay = (events: CalEvent[], day: number, prefs: Prefs): Interval[] => {
-  const busy = busyFor('you', events, day)
+/** Free gaps in a person's day, inside working hours. */
+export const gapsForDay = (
+  events: CalEvent[],
+  day: number,
+  prefs: Prefs,
+  person: PersonId = 'you',
+): Interval[] => {
+  const busy = busyFor(person, events, day)
   const gaps: Interval[] = []
   let cursor = prefs.dayStart
   for (const b of busy) {
@@ -40,7 +45,7 @@ export interface Metrics {
   meetingFreeDays: number
 }
 
-export const measure = (events: CalEvent[], prefs: Prefs): Metrics => {
+export const measure = (events: CalEvent[], prefs: Prefs, person: PersonId = 'you'): Metrics => {
   const m: Metrics = {
     focusTime: 0,
     longestBlock: 0,
@@ -51,8 +56,8 @@ export const measure = (events: CalEvent[], prefs: Prefs): Metrics => {
     meetingFreeDays: 0,
   }
 
-  for (let day = 0; day < 5; day++) {
-    for (const g of gapsForDay(events, day, prefs)) {
+  for (let day = 0; day < HORIZON_DAYS; day++) {
+    for (const g of gapsForDay(events, day, prefs, person)) {
       const len = g.end - g.start
       if (len >= prefs.minFocusBlock) {
         m.focusTime += len
@@ -62,7 +67,7 @@ export const measure = (events: CalEvent[], prefs: Prefs): Metrics => {
         m.fragmentedMinutes += len
       }
     }
-    const mine = events.filter((e) => e.day === day && e.attendees.includes('you'))
+    const mine = events.filter((e) => e.day === day && e.attendees.includes(person))
     if (mine.length === 0) m.meetingFreeDays++
     for (const e of mine) {
       if (e.start < prefs.noMeetingsBefore) m.earlyMeetings++
@@ -78,8 +83,8 @@ export const measure = (events: CalEvent[], prefs: Prefs): Metrics => {
  * genuinely long block and charge for fragmentation, early meetings and
  * meetings that eat lunch.
  */
-const score = (events: CalEvent[], prefs: Prefs): number => {
-  const m = measure(events, prefs)
+const score = (events: CalEvent[], prefs: Prefs, person: PersonId = 'you'): number => {
+  const m = measure(events, prefs, person)
   return (
     m.focusTime +
     m.longestBlock * 0.6 +
@@ -98,7 +103,9 @@ const candidateSlots = (
   others: CalEvent[],
   prefs: Prefs,
 ): Array<{ day: number; start: number }> => {
-  const days = prefs.allowDayChange ? [0, 1, 2, 3, 4] : [event.day]
+  // Moves stay inside the event's own week — nobody wants this week's sync
+  // silently pushed to next week.
+  const days = prefs.allowDayChange ? daysInWeek(weekOf(event.day)) : [event.day]
   const out: Array<{ day: number; start: number }> = []
 
   for (const day of days) {
@@ -207,4 +214,113 @@ export const optimize = (all: CalEvent[], prefs: Prefs, restarts = 40): Optimize
     moved,
     stuck: bestStuck,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Booking a new meeting: "find a slot that works for us"
+// ---------------------------------------------------------------------------
+
+export interface MeetingRequest {
+  title: string
+  /** Everyone besides you. */
+  attendees: PersonId[]
+  durationMinutes: number
+  timeOfDay: 'morning' | 'afternoon' | 'any'
+  /** Inclusive horizon day indices. */
+  earliestDay: number
+  latestDay: number
+}
+
+export interface SlotProposal {
+  day: number
+  start: number
+  /** Usable focus minutes this booking destroys, summed over all attendees. */
+  focusCost: number
+  perPerson: Array<{ person: PersonId; cost: number }>
+}
+
+/** Usable focus minutes in one person's day. */
+const dayFocus = (events: CalEvent[], day: number, prefs: Prefs, person: PersonId): number =>
+  gapsForDay(events, day, prefs, person)
+    .map((g) => g.end - g.start)
+    .filter((len) => len >= prefs.minFocusBlock)
+    .reduce((a, b) => a + b, 0)
+
+const window = (timeOfDay: MeetingRequest['timeOfDay'], prefs: Prefs): Interval =>
+  timeOfDay === 'morning'
+    ? { start: prefs.dayStart, end: prefs.lunchStart }
+    : timeOfDay === 'afternoon'
+      ? { start: prefs.lunchEnd, end: prefs.dayEnd }
+      : { start: prefs.dayStart, end: prefs.dayEnd }
+
+/**
+ * Ranks every legal slot by what it *costs* rather than taking the first gap.
+ * A meeting dropped into the middle of someone's three-hour block destroys the
+ * whole block; the same meeting butted against an existing one costs nothing.
+ * That difference is the entire point — so we score candidates by the focus
+ * time they destroy across everyone attending, not just the requester.
+ */
+export const proposeSlots = (
+  events: CalEvent[],
+  prefs: Prefs,
+  req: MeetingRequest,
+  limit = 3,
+): SlotProposal[] => {
+  const people: PersonId[] = ['you', ...req.attendees.filter((a) => a !== 'you')]
+  const win = window(req.timeOfDay, prefs)
+  const earliest = Math.max(win.start, prefs.dayStart, prefs.noMeetingsBefore)
+  const lunch = { start: prefs.lunchStart, end: prefs.lunchEnd }
+
+  const lo = Math.max(0, Math.min(req.earliestDay, req.latestDay))
+  const hi = Math.min(HORIZON_DAYS - 1, Math.max(req.earliestDay, req.latestDay))
+
+  const out: SlotProposal[] = []
+
+  for (let day = lo; day <= hi; day++) {
+    const dayEvents = events.filter((e) => e.day === day)
+    const focusBefore = new Map(people.map((p) => [p, dayFocus(events, day, prefs, p)]))
+
+    for (let start = earliest; start + req.durationMinutes <= win.end; start += SLOT) {
+      const slot = { start, end: start + req.durationMinutes }
+      if (overlaps(slot, lunch)) continue
+
+      const clash = dayEvents.some(
+        (e) =>
+          e.attendees.some((a) => people.includes(a)) &&
+          overlaps(slot, { start: e.start, end: e.start + e.duration }),
+      )
+      if (clash) continue
+
+      const booked: CalEvent[] = [
+        ...events,
+        {
+          id: '__proposed',
+          title: req.title,
+          day,
+          start,
+          duration: req.durationMinutes,
+          flexible: true,
+          attendees: people,
+          kind: 'internal',
+        },
+      ]
+
+      const perPerson = people.map((person) => ({
+        person,
+        cost: focusBefore.get(person)! - dayFocus(booked, day, prefs, person),
+      }))
+
+      out.push({
+        day,
+        start,
+        focusCost: perPerson.reduce((a, b) => a + b.cost, 0),
+        perPerson,
+      })
+    }
+  }
+
+  // Cheapest first; among equals, the soonest slot wins — a free slot two weeks
+  // out is worse than an equally free one on Monday.
+  out.sort((a, b) => a.focusCost - b.focusCost || a.day - b.day || a.start - b.start)
+  return out.slice(0, limit)
 }

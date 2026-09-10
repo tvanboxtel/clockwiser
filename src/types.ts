@@ -8,11 +8,12 @@
 
 export type PersonId = 'you' | 'sofia' | 'marc' | 'lena'
 
+/** `color` is a CSS variable so each theme can retune the roster (see index.css). */
 export const PEOPLE: Record<PersonId, { name: string; color: string }> = {
-  you: { name: 'You', color: '#6366f1' },
-  sofia: { name: 'Sofia', color: '#ec4899' },
-  marc: { name: 'Marc', color: '#f59e0b' },
-  lena: { name: 'Lena', color: '#10b981' },
+  you: { name: 'You', color: 'var(--person-you)' },
+  sofia: { name: 'Sofia', color: 'var(--person-sofia)' },
+  marc: { name: 'Marc', color: 'var(--person-marc)' },
+  lena: { name: 'Lena', color: 'var(--person-lena)' },
 }
 
 export type EventKind = 'external' | 'internal' | 'oneonone' | 'focus' | 'personal'
@@ -57,6 +58,41 @@ export const DEFAULT_PREFS: Prefs = {
 }
 
 export const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+
+/** Two working weeks — enough to honour "sometime in the next two weeks". */
+export const HORIZON_DAYS = 10
+
+export const weekOf = (day: number) => Math.floor(day / 5)
+export const daysInWeek = (week: number) => [0, 1, 2, 3, 4].map((d) => week * 5 + d)
+
+/** Monday of next week, so every day in the horizon is in the future. */
+const nextMonday = () => {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7))
+  return d
+}
+
+export interface HorizonDay {
+  day: number
+  week: number
+  weekday: string
+  date: Date
+  /** e.g. "Mon 14 Sep" */
+  label: string
+}
+
+export const HORIZON: HorizonDay[] = Array.from({ length: HORIZON_DAYS }, (_, i) => {
+  const date = new Date(nextMonday())
+  date.setDate(date.getDate() + Math.floor(i / 5) * 7 + (i % 5))
+  return {
+    day: i,
+    week: weekOf(i),
+    weekday: DAYS[i % 5],
+    date,
+    label: `${DAYS[i % 5]} ${date.getDate()} ${date.toLocaleString('en', { month: 'short' })}`,
+  }
+})
 
 export const fmt = (min: number) => {
   const h = Math.floor(min / 60)

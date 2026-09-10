@@ -1,10 +1,218 @@
 @import "tailwindcss";
 
-:root {
+/* ---------------------------------------------------------------------------
+ * Theming
+ *
+ * Every colour the UI paints comes from a variable defined here, so a theme is
+ * just one block of overrides keyed on `data-theme` on <html>. `@theme inline`
+ * below turns each one into a Tailwind utility (`bg-canvas`, `text-muted`, …)
+ * that resolves the variable at paint time rather than baking in a value —
+ * which is what lets a theme swap take effect without re-rendering anything.
+ * ------------------------------------------------------------------------- */
+
+/* --- dark (default) */
+:root,
+:root[data-theme='dark'] {
   color-scheme: dark;
+
+  --canvas: #0b0d14;
+  --panel: rgba(255, 255, 255, 0.02);
+  --panel-soft: rgba(255, 255, 255, 0.035);
+  --line: rgba(255, 255, 255, 0.1);
+  --line-soft: rgba(255, 255, 255, 0.06);
+  --hover: rgba(255, 255, 255, 0.05);
+
+  --fg: #ffffff;
+  --body: #cbd5e1;
+  --muted: #94a3b8;
+  --subtle: #64748b;
+
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-fg: #ffffff;
+  --accent-glow: rgba(99, 102, 241, 0.3);
+
+  --good: #34d399;
+  --bad: #fb7185;
+  --warn: #fbbf24;
+
+  --lunch: rgba(251, 191, 36, 0.05);
+  --focus-bg: rgba(52, 211, 153, 0.07);
+  --focus-line: rgba(52, 211, 153, 0.4);
+  --focus-fg: rgba(110, 231, 183, 0.9);
+
+  --person-you: #6366f1;
+  --person-sofia: #ec4899;
+  --person-marc: #f59e0b;
+  --person-lena: #10b981;
+
+  --ev-external-bg: rgba(244, 63, 94, 0.25);
+  --ev-external-line: rgba(251, 113, 133, 0.7);
+  --ev-external-fg: #fff1f2;
+  --ev-internal-bg: rgba(99, 102, 241, 0.25);
+  --ev-internal-line: rgba(129, 140, 248, 0.7);
+  --ev-internal-fg: #eef2ff;
+  --ev-oneonone-bg: rgba(139, 92, 246, 0.25);
+  --ev-oneonone-line: rgba(167, 139, 250, 0.7);
+  --ev-oneonone-fg: #f5f3ff;
+  --ev-focus-bg: rgba(16, 185, 129, 0.25);
+  --ev-focus-line: rgba(52, 211, 153, 0.7);
+  --ev-focus-fg: #ecfdf5;
+  --ev-personal-bg: rgba(100, 116, 139, 0.25);
+  --ev-personal-line: rgba(148, 163, 184, 0.7);
+  --ev-personal-fg: #f8fafc;
+}
+
+/* --- light */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --canvas: #f5f6fa;
+  --panel: #ffffff;
+  --panel-soft: #eef1f7;
+  --line: rgba(15, 23, 42, 0.12);
+  --line-soft: rgba(15, 23, 42, 0.07);
+  --hover: rgba(15, 23, 42, 0.04);
+
+  --fg: #0f172a;
+  --body: #334155;
+  --muted: #5b6878;
+  --subtle: #8593a4;
+
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-fg: #ffffff;
+  --accent-glow: rgba(79, 70, 229, 0.28);
+
+  --good: #059669;
+  --bad: #e11d48;
+  --warn: #b45309;
+
+  --lunch: rgba(245, 158, 11, 0.1);
+  --focus-bg: rgba(16, 185, 129, 0.09);
+  --focus-line: rgba(5, 150, 105, 0.45);
+  --focus-fg: #047857;
+
+  --person-you: #4f46e5;
+  --person-sofia: #db2777;
+  --person-marc: #d97706;
+  --person-lena: #059669;
+
+  --ev-external-bg: #ffe4e6;
+  --ev-external-line: #fda4af;
+  --ev-external-fg: #9f1239;
+  --ev-internal-bg: #e0e7ff;
+  --ev-internal-line: #a5b4fc;
+  --ev-internal-fg: #312e81;
+  --ev-oneonone-bg: #ede9fe;
+  --ev-oneonone-line: #c4b5fd;
+  --ev-oneonone-fg: #4c1d95;
+  --ev-focus-bg: #d1fae5;
+  --ev-focus-line: #6ee7b7;
+  --ev-focus-fg: #065f46;
+  --ev-personal-bg: #e5eaf1;
+  --ev-personal-line: #cbd5e1;
+  --ev-personal-fg: #334155;
+}
+
+/* --- pastel: light, but on tinted lilac paper with candy event chips */
+:root[data-theme='pastel'] {
+  color-scheme: light;
+
+  --canvas: #f7f4fd;
+  --panel: #fffdff;
+  --panel-soft: #f2edfb;
+  --line: rgba(124, 101, 180, 0.18);
+  --line-soft: rgba(124, 101, 180, 0.09);
+  --hover: rgba(124, 101, 180, 0.07);
+
+  --fg: #3b2f63;
+  --body: #5b5178;
+  --muted: #7a6f99;
+  --subtle: #a29ab8;
+
+  --accent: #c4b5fd;
+  --accent-hover: #b3a1fb;
+  --accent-fg: #3b2f63;
+  --accent-glow: rgba(167, 139, 250, 0.35);
+
+  --good: #1f8a63;
+  --bad: #d13c5c;
+  --warn: #a86a1c;
+
+  --lunch: rgba(251, 191, 36, 0.12);
+  --focus-bg: rgba(94, 214, 170, 0.14);
+  --focus-line: rgba(94, 190, 155, 0.5);
+  --focus-fg: #1f7a5c;
+
+  --person-you: #a78bfa;
+  --person-sofia: #f472b6;
+  --person-marc: #fbbf24;
+  --person-lena: #5eddb0;
+
+  --ev-external-bg: #ffe8ee;
+  --ev-external-line: #ffc2d4;
+  --ev-external-fg: #a13a5e;
+  --ev-internal-bg: #e6ecff;
+  --ev-internal-line: #c3cfff;
+  --ev-internal-fg: #3f4a9e;
+  --ev-oneonone-bg: #f0e9ff;
+  --ev-oneonone-line: #d6c7ff;
+  --ev-oneonone-fg: #5b3f9e;
+  --ev-focus-bg: #dcf8ec;
+  --ev-focus-line: #b0ecd2;
+  --ev-focus-fg: #1f7a5c;
+  --ev-personal-bg: #eef0f7;
+  --ev-personal-line: #d8dcea;
+  --ev-personal-fg: #545c73;
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-panel-soft: var(--panel-soft);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-hover: var(--hover);
+
+  --color-fg: var(--fg);
+  --color-body: var(--body);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+
+  --color-good: var(--good);
+  --color-bad: var(--bad);
+  --color-warn: var(--warn);
+
+  --color-lunch: var(--lunch);
+  --color-focus-bg: var(--focus-bg);
+  --color-focus-line: var(--focus-line);
+  --color-focus-fg: var(--focus-fg);
 }
 
 body {
   margin: 0;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--canvas);
+  color: var(--body);
+}
+
+@layer components {
+  /* Event chips. Colour only — callers keep control of layout and border style,
+     so `border-dashed` on a flexible meeting still wins. */
+  .ev {
+    border-width: 1px;
+    background-color: var(--ev-bg);
+    border-color: var(--ev-line);
+    color: var(--ev-fg);
+  }
+  .ev-external { --ev-bg: var(--ev-external-bg); --ev-line: var(--ev-external-line); --ev-fg: var(--ev-external-fg); }
+  .ev-internal { --ev-bg: var(--ev-internal-bg); --ev-line: var(--ev-internal-line); --ev-fg: var(--ev-internal-fg); }
+  .ev-oneonone { --ev-bg: var(--ev-oneonone-bg); --ev-line: var(--ev-oneonone-line); --ev-fg: var(--ev-oneonone-fg); }
+  .ev-focus    { --ev-bg: var(--ev-focus-bg);    --ev-line: var(--ev-focus-line);    --ev-fg: var(--ev-focus-fg); }
+  .ev-personal { --ev-bg: var(--ev-personal-bg); --ev-line: var(--ev-personal-line); --ev-fg: var(--ev-personal-fg); }
 }

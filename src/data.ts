@@ -69,6 +69,36 @@ export const DEMO_WEEK: CalEvent[] = [
   ev('Lena: legal review', 0, at(16, 0), 90, false, ['lena']),
   ev('Lena: conference talk', 3, at(11, 0), 90, false, ['lena']),
   ev('Lena: budget planning', 4, at(13, 0), 120, false, ['lena']),
+
+  // ================= Week 2 — emptier, which is where a "next two weeks"
+  // request usually finds room.
+  ev('Standup', 5, at(9, 30), 15, false, ['you', 'sofia', 'marc', 'lena']),
+  ev('Q3 planning kickoff', 5, at(11, 0), 90, false, ['you', 'sofia', 'marc', 'lena']),
+  ev('Pipeline review', 5, at(15, 0), 45, true, ['you', 'sofia']),
+
+  ev('Standup', 6, at(9, 30), 15, false, ['you', 'sofia', 'marc', 'lena']),
+  ev('Design crit', 6, at(13, 30), 60, true, ['you', 'sofia']),
+  ev('Renewal call: Globex', 6, at(16, 0), 45, false, ['you'], 'external'),
+
+  ev('Standup', 7, at(9, 30), 15, false, ['you', 'sofia', 'marc', 'lena']),
+  ev('Incident postmortem', 7, at(11, 0), 60, true, ['you', 'marc', 'lena']),
+  ev('Hiring sync', 7, at(15, 30), 30, true, ['you', 'lena']),
+
+  ev('Standup', 8, at(9, 30), 15, false, ['you', 'sofia', 'marc', 'lena']),
+  ev('All-hands', 8, at(10, 0), 45, false, ['you', 'sofia', 'marc', 'lena']),
+  ev('Roadmap deep dive', 8, at(14, 0), 90, true, ['you', 'sofia', 'marc']),
+
+  ev('Standup', 9, at(9, 30), 15, false, ['you', 'sofia', 'marc', 'lena']),
+  ev('Retro', 9, at(11, 0), 45, true, ['you', 'sofia', 'marc', 'lena']),
+  ev('Demo Friday', 9, at(15, 0), 60, false, ['you', 'sofia', 'marc', 'lena']),
+
+  // teammate-only, week 2
+  ev('Sofia: customer visit', 6, at(9, 45), 150, false, ['sofia']),
+  ev('Sofia: content review', 8, at(11, 0), 90, false, ['sofia']),
+  ev('Marc: platform migration', 5, at(13, 0), 180, false, ['marc']),
+  ev('Marc: on-call', 7, at(13, 0), 120, false, ['marc']),
+  ev('Lena: compliance audit', 6, at(11, 0), 120, false, ['lena']),
+  ev('Lena: 1:1s block', 9, at(13, 0), 120, false, ['lena']),
 ]
 
 export const loadDemoWeek = (): CalEvent[] => DEMO_WEEK.map((e) => ({ ...e }))
