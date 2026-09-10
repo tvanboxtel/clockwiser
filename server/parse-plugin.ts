@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Plugin } from 'vite'
 import { MeetingRequestSchema, buildSystemPrompt } from '../src/intent'
 
@@ -10,6 +12,29 @@ const readBody = (req: import('node:http').IncomingMessage): Promise<string> =>
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
     req.on('error', reject)
   })
+
+/** Minimal KEY=VALUE reader for .env / .env.local — enough for one API key. */
+const readEnvFile = (dir: string): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const name of ['.env', '.env.local']) {
+    let text: string
+    try {
+      text = readFileSync(join(dir, name), 'utf8')
+    } catch {
+      continue // absent is normal
+    }
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eq = trimmed.indexOf('=')
+      if (eq === -1) continue
+      const key = trimmed.slice(0, eq).trim().replace(/^export\s+/, '')
+      const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '')
+      if (key) out[key] = value
+    }
+  }
+  return out
+}
 
 /**
  * Dev-only endpoint that parses a spoken request into a MeetingRequest.
@@ -22,6 +47,18 @@ const readBody = (req: import('node:http').IncomingMessage): Promise<string> =>
 export const parsePlugin = (): Plugin => ({
   name: 'clockwiser-parse-api',
   configureServer(server) {
+    // Vite parses .env into import.meta.env and only exposes VITE_* to the
+    // client — it never populates process.env, and loadEnv() didn't reliably
+    // merge the file here either. So read it ourselves: a real env var wins,
+    // otherwise fall back to the file. Dev-server-only; never in the bundle.
+    const apiKey = process.env.ANTHROPIC_API_KEY || readEnvFile(server.config.envDir || server.config.root).ANTHROPIC_API_KEY
+
+    server.config.logger.info(
+      apiKey
+        ? `  \x1b[32m➜\x1b[0m  parse api: using Claude (key …${apiKey.slice(-4)})`
+        : `  \x1b[33m➜\x1b[0m  parse api: no ANTHROPIC_API_KEY — falling back to local parser`,
+    )
+
     server.middlewares.use('/api/parse', async (req, res) => {
       const send = (status: number, body: unknown) => {
         res.statusCode = status
@@ -30,14 +67,13 @@ export const parsePlugin = (): Plugin => ({
       }
 
       if (req.method !== 'POST') return send(405, { error: 'POST only' })
-      if (!process.env.ANTHROPIC_API_KEY)
-        return send(503, { error: 'ANTHROPIC_API_KEY not set — using local parser' })
+      if (!apiKey) return send(503, { error: 'ANTHROPIC_API_KEY not set — using local parser' })
 
       try {
         const { transcript } = JSON.parse(await readBody(req)) as { transcript?: string }
         if (!transcript?.trim()) return send(400, { error: 'empty transcript' })
 
-        const client = new Anthropic()
+        const client = new Anthropic({ apiKey })
         const response = await client.messages.parse({
           model: 'claude-opus-5',
           max_tokens: 4000,
