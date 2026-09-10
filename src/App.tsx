@@ -1,8 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { loadDemoWeek } from './data'
-import { gapsForDay, measure, optimize, type Metrics, type OptimizeResult } from './optimizer'
+import {
+  gapsForDay,
+  measure,
+  optimize,
+  proposeSlots,
+  type Metrics,
+  type OptimizeResult,
+  type SlotProposal,
+} from './optimizer'
+import { parseLocally, toMeetingRequest, type ParsedRequest } from './intent'
+import { speechSupported, useSpeech } from './useSpeech'
 import { THEMES, useTheme, type ThemeId } from './theme'
-import { DAYS, DEFAULT_PREFS, PEOPLE, fmt, fmtDuration, type CalEvent, type PersonId, type Prefs } from './types'
+import {
+  DEFAULT_PREFS,
+  HORIZON,
+  PEOPLE,
+  daysInWeek,
+  fmt,
+  fmtDuration,
+  type CalEvent,
+  type PersonId,
+  type Prefs,
+} from './types'
 
 const HOUR_PX = 68
 const y = (min: number, prefs: Prefs) => ((min - prefs.dayStart) / 60) * HOUR_PX
@@ -15,6 +35,12 @@ const KIND_STYLE: Record<string, string> = {
   focus: 'ev ev-focus',
   personal: 'ev ev-personal',
 }
+
+const EXAMPLES = [
+  'I need 30 minutes with Sofia in the morning sometime in the next two weeks',
+  'Book an hour with Marc and Lena next week, afternoons only',
+  'Quick chat with Lena on Thursday',
+]
 
 /** Tweens a number so the headline stat visibly climbs when you optimize. */
 function useTween(value: number, ms = 700) {
@@ -98,14 +124,29 @@ function Stat({ label, value, delta, good }: { label: string; value: string; del
   )
 }
 
+function Chip({ children }: { children: React.ReactNode }) {
+  return <span className="rounded-md bg-hover px-2 py-0.5 text-[11px] text-body">{children}</span>
+}
+
 export default function App() {
   const { theme, setTheme } = useTheme()
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS)
   const [events, setEvents] = useState<CalEvent[]>(loadDemoWeek)
-  const [baseline] = useState<CalEvent[]>(loadDemoWeek)
+  // Stateful, because booking a meeting has to survive a later Optimize.
+  const [baseline, setBaseline] = useState<CalEvent[]>(loadDemoWeek)
   const [result, setResult] = useState<OptimizeResult | null>(null)
   const [showTeam, setShowTeam] = useState(false)
   const [running, setRunning] = useState(false)
+  const [week, setWeek] = useState(0)
+
+  // --- spoken meeting requests
+  const [text, setText] = useState('')
+  const [parsed, setParsed] = useState<ParsedRequest | null>(null)
+  const [source, setSource] = useState<'claude' | 'local' | null>(null)
+  const [proposals, setProposals] = useState<SlotProposal[] | null>(null)
+  const [thinking, setThinking] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [justBooked, setJustBooked] = useState<string | null>(null)
 
   const current: Metrics = useMemo(() => measure(events, prefs), [events, prefs])
   const before = result?.before ?? null
@@ -116,6 +157,71 @@ export default function App() {
   }, [events, baseline, result])
 
   const focusShown = useTween(current.focusTime)
+  const proposedDuration = parsed ? toMeetingRequest(parsed).durationMinutes : 30
+
+  /** Parse a spoken/typed request, then rank slots for it. */
+  const findSlots = useCallback(
+    async (transcript: string) => {
+      if (!transcript.trim()) return
+      setThinking(true)
+      setNotice(null)
+      setProposals(null)
+
+      let p: ParsedRequest
+      let src: 'claude' | 'local' = 'claude'
+      try {
+        const res = await fetch('/api/parse', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ transcript }),
+        })
+        const payload = (await res.json()) as { parsed?: ParsedRequest; error?: string }
+        if (!res.ok || !payload.parsed) throw new Error(payload.error ?? res.statusText)
+        p = payload.parsed
+      } catch (err) {
+        // Never let a missing key or a dead network take the feature down.
+        p = parseLocally(transcript)
+        src = 'local'
+        setNotice(err instanceof Error ? err.message : String(err))
+      }
+
+      setParsed(p)
+      setSource(src)
+      const slots = proposeSlots(events, prefs, toMeetingRequest(p), 3)
+      setProposals(slots)
+      if (slots.length > 0) setWeek(Math.floor(slots[0].day / 5))
+      setThinking(false)
+    },
+    [events, prefs],
+  )
+
+  const { listening, interim, error: micError, start, stop } = useSpeech(
+    useCallback((t: string) => { setText(t); void findSlots(t) }, [findSlots]),
+  )
+
+  const book = (slot: SlotProposal) => {
+    if (!parsed) return
+    const req = toMeetingRequest(parsed)
+    const booked: CalEvent = {
+      id: `booked-${Date.now()}`,
+      title: req.title,
+      day: slot.day,
+      start: slot.start,
+      duration: req.durationMinutes,
+      // Pinned: we chose this slot deliberately, so a later Optimize works
+      // around it instead of undoing the decision.
+      flexible: false,
+      attendees: ['you', ...req.attendees.filter((a) => a !== 'you')],
+      kind: 'internal',
+    }
+    setEvents((prev) => [...prev, booked])
+    setBaseline((prev) => [...prev, booked])
+    setWeek(Math.floor(slot.day / 5))
+    setProposals(null)
+    setParsed(null)
+    setJustBooked(booked.id)
+    setTimeout(() => setJustBooked(null), 2500)
+  }
 
   const run = () => {
     setRunning(true)
@@ -130,11 +236,16 @@ export default function App() {
 
   const reset = () => {
     setEvents(loadDemoWeek())
+    setBaseline(loadDemoWeek())
     setResult(null)
+    setProposals(null)
+    setParsed(null)
+    setText('')
   }
 
   const hours: number[] = []
   for (let h = prefs.dayStart; h <= prefs.dayEnd; h += 60) hours.push(h)
+  const visibleDays = daysInWeek(week)
 
   return (
     <div className="min-h-screen bg-canvas text-body">
@@ -155,20 +266,132 @@ export default function App() {
               onClick={reset}
               className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-body transition hover:bg-hover"
             >
-              Reset week
+              Reset
             </button>
             <button
               onClick={run}
               disabled={running}
               className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-fg shadow-[0_10px_22px_-8px_var(--accent-glow)] transition hover:bg-accent-hover disabled:opacity-60"
             >
-              {running ? 'Optimizing…' : 'Optimize my week'}
+              {running ? 'Optimizing…' : 'Optimize my weeks'}
             </button>
           </div>
         </div>
 
+        {/* ---- ask for a meeting */}
+        <div className="mt-5 rounded-2xl border border-line bg-panel p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={listening ? stop : start}
+              disabled={!speechSupported()}
+              aria-label={listening ? 'Stop listening' : 'Speak a meeting request'}
+              title={speechSupported() ? 'Speak a meeting request' : 'No speech recognition in this browser — type it instead'}
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-lg transition disabled:opacity-40 ${
+                listening ? 'animate-pulse bg-bad text-canvas' : 'bg-hover text-body hover:bg-panel-soft'
+              }`}
+            >
+              {listening ? '■' : '🎙'}
+            </button>
+            <input
+              value={listening && interim ? interim : text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void findSlots(text)}
+              placeholder={EXAMPLES[0]}
+              className="min-w-[280px] flex-1 rounded-lg border border-line bg-panel-soft px-3 py-2.5 text-sm text-fg placeholder:text-subtle focus:border-accent focus:outline-none"
+            />
+            <button
+              onClick={() => void findSlots(text)}
+              disabled={thinking || !text.trim()}
+              className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg transition hover:bg-accent-hover disabled:opacity-40"
+            >
+              {thinking ? 'Thinking…' : 'Find a slot'}
+            </button>
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-subtle">
+            {listening ? (
+              <span className="font-semibold text-bad">Listening…</span>
+            ) : (
+              <>
+                <span>Try:</span>
+                {EXAMPLES.map((ex) => (
+                  <button
+                    key={ex}
+                    onClick={() => { setText(ex); void findSlots(ex) }}
+                    className="rounded-md bg-panel-soft px-2 py-1 text-muted transition hover:bg-hover hover:text-body"
+                  >
+                    {ex}
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+
+          {(micError || notice) && (
+            <div className="mt-2 text-[11px] text-warn">
+              {micError ?? `Claude unavailable (${notice}) — parsed locally instead.`}
+            </div>
+          )}
+
+          {/* parsed request + ranked slots */}
+          {parsed && (
+            <div className="mt-3 border-t border-line pt-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted">Understood:</span>
+                <Chip>{parsed.title}</Chip>
+                <Chip>{fmtDuration(proposedDuration)}</Chip>
+                {parsed.attendees.length > 0 && <Chip>with {parsed.attendees.map((a) => PEOPLE[a].name).join(', ')}</Chip>}
+                {parsed.timeOfDay !== 'any' && <Chip>{parsed.timeOfDay}</Chip>}
+                <Chip>{HORIZON[parsed.earliestDay]?.label} → {HORIZON[parsed.latestDay]?.label}</Chip>
+                <span className={`ml-1 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${source === 'claude' ? 'bg-accent text-accent-fg' : 'bg-warn/20 text-warn'}`}>
+                  {source === 'claude' ? 'Claude' : 'local parser'}
+                </span>
+              </div>
+
+              {proposals && proposals.length === 0 && (
+                <div className="mt-3 text-sm text-warn">
+                  No slot works for everyone in that window. Try widening the range or dropping an attendee.
+                </div>
+              )}
+
+              {proposals && proposals.length > 0 && (
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  {proposals.map((s, i) => (
+                    <button
+                      key={`${s.day}-${s.start}`}
+                      onClick={() => book(s)}
+                      className={`group rounded-xl border px-3 py-3 text-left transition ${
+                        i === 0 ? 'border-good bg-focus-bg hover:bg-hover' : 'border-line bg-panel-soft hover:bg-hover'
+                      }`}
+                    >
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-sm font-semibold text-fg">{HORIZON[s.day]?.label}</span>
+                        {i === 0 && <span className="text-[10px] font-semibold uppercase tracking-wide text-good">best</span>}
+                      </div>
+                      <div className="mt-0.5 text-sm tabular-nums text-body">
+                        {fmt(s.start)}–{fmt(s.start + proposedDuration)}
+                      </div>
+                      <div className={`mt-2 text-[11px] ${s.focusCost === 0 ? 'text-good' : 'text-warn'}`}>
+                        {s.focusCost === 0 ? 'costs nobody any focus time' : `costs ${fmtDuration(s.focusCost)} of focus time`}
+                      </div>
+                      {s.focusCost > 0 && (
+                        <div className="mt-1 text-[10px] text-subtle">
+                          {s.perPerson.filter((p) => p.cost > 0).map((p) => `${PEOPLE[p.person].name} −${fmtDuration(p.cost)}`).join(' · ')}
+                        </div>
+                      )}
+                      <div className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-muted group-hover:text-fg">
+                        Book it →
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* ---- stats */}
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <Stat
             label="Usable focus time"
             value={fmtDuration(Math.round(focusShown / 5) * 5)}
@@ -183,6 +406,17 @@ export default function App() {
 
         {/* ---- controls */}
         <div className="mt-4 flex flex-wrap items-center gap-4 rounded-xl border border-line bg-panel px-4 py-3 text-sm">
+          <div className="flex overflow-hidden rounded-lg border border-line">
+            {[0, 1].map((w) => (
+              <button
+                key={w}
+                onClick={() => setWeek(w)}
+                className={`px-3 py-1.5 text-xs font-semibold transition ${week === w ? 'bg-accent text-accent-fg' : 'text-muted hover:bg-hover'}`}
+              >
+                {w === 0 ? 'This week' : 'Next week'}
+              </button>
+            ))}
+          </div>
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={prefs.allowDayChange} onChange={(e) => setPrefs({ ...prefs, allowDayChange: e.target.checked })} className="accent-accent" />
             Move across days
@@ -216,9 +450,9 @@ export default function App() {
         <div className="mt-4 overflow-hidden rounded-2xl border border-line bg-panel">
           <div className="grid" style={{ gridTemplateColumns: `64px repeat(5, minmax(0,1fr))` }}>
             <div className="border-b border-line px-2 py-2" />
-            {DAYS.map((d) => (
-              <div key={d} className="border-b border-l border-line px-3 py-2 text-sm font-semibold text-body">
-                {d}
+            {visibleDays.map((day) => (
+              <div key={day} className="border-b border-l border-line px-3 py-2 text-sm font-semibold text-body">
+                {HORIZON[day].weekday} <span className="font-normal text-subtle">{HORIZON[day].date.getDate()}</span>
               </div>
             ))}
 
@@ -231,11 +465,12 @@ export default function App() {
               ))}
             </div>
 
-            {DAYS.map((_, day) => {
+            {visibleDays.map((day) => {
               const dayEvents = events.filter((e) => e.day === day)
               const mine = dayEvents.filter((e) => e.attendees.includes('you'))
               const theirs = dayEvents.filter((e) => !e.attendees.includes('you'))
               const focusBlocks = gapsForDay(events, day, prefs).filter((g) => g.end - g.start >= prefs.minFocusBlock)
+              const proposedHere = (proposals ?? []).filter((s) => s.day === day)
 
               return (
                 <div key={day} className="relative border-l border-line" style={{ height: y(prefs.dayEnd, prefs) }}>
@@ -262,6 +497,15 @@ export default function App() {
                     </div>
                   ))}
 
+                  {/* candidate slots for the pending request */}
+                  {proposedHere.map((s) => (
+                    <div
+                      key={`p${s.start}`}
+                      className="pointer-events-none absolute inset-x-1 z-10 animate-pulse rounded-lg border-2 border-dashed border-accent bg-accent/25"
+                      style={{ top: y(s.start, prefs), height: Math.max(20, y(s.start + proposedDuration, prefs) - y(s.start, prefs) - 2) }}
+                    />
+                  ))}
+
                   {/* teammate-only commitments */}
                   {showTeam &&
                     theirs.map((e) => (
@@ -280,10 +524,11 @@ export default function App() {
                   {/* your meetings */}
                   {mine.map((e) => {
                     const moved = movedIds.has(e.id)
+                    const fresh = justBooked === e.id
                     return (
                       <div
                         key={e.id}
-                        className={`absolute left-1 ${showTeam ? 'right-4' : 'right-1'} overflow-hidden rounded-lg px-2 py-1 text-[11px] leading-tight backdrop-blur-sm transition-all duration-700 ease-out ${KIND_STYLE[e.kind]} ${e.flexible ? 'border-dashed' : ''} ${moved ? 'ring-2 ring-good' : ''}`}
+                        className={`absolute left-1 ${showTeam ? 'right-4' : 'right-1'} overflow-hidden rounded-lg px-2 py-1 text-[11px] leading-tight backdrop-blur-sm transition-all duration-700 ease-out ${KIND_STYLE[e.kind]} ${e.flexible ? 'border-dashed' : ''} ${moved ? 'ring-2 ring-good' : ''} ${fresh ? 'z-20 ring-2 ring-accent' : ''}`}
                         style={{ top: y(e.start, prefs), height: Math.max(20, y(e.start + e.duration, prefs) - y(e.start, prefs) - 2) }}
                         title={`${e.title} · ${fmt(e.start)}–${fmt(e.start + e.duration)} · ${e.attendees.map((a) => PEOPLE[a].name).join(', ')}`}
                       >
@@ -305,6 +550,7 @@ export default function App() {
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded border border-dashed border-muted" /> flexible — optimizer may move</span>
           <span className="flex items-center gap-1.5">🔒 fixed — never moved</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded border border-dashed border-focus-line bg-focus-bg" /> usable focus block</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded border-2 border-dashed border-accent bg-accent/25" /> proposed slot</span>
           {Object.entries(PEOPLE).filter(([k]) => k !== 'you').map(([k, p]) => (
             <span key={k} className="flex items-center gap-1.5"><span className="inline-block h-3 w-1.5 rounded-full" style={{ background: p.color }} /> {p.name}</span>
           ))}
