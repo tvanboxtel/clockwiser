@@ -232,14 +232,49 @@ export default function App() {
   // Send the frog to whatever we just booked, once it has actually painted.
   useEffect(() => {
     if (!justBooked) return
-    const raf = requestAnimationFrame(() => {
+    let raf = 0
+    let cancelled = false
+
+    // Centre it rather than merely nudging it into view, so there's room for a
+    // frog underneath wherever the meeting sits in the day.
+    const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    bookedElRef.current?.scrollIntoView({ block: 'center', behavior: calm ? 'auto' : 'smooth' })
+
+    // Smooth scrolling is asynchronous: measuring now would aim him at where
+    // the meeting used to be, which is exactly the off-screen case. Wait for
+    // the rect to stop moving, with a deadline in case it never settles.
+    let lastTop = Number.NaN
+    let steady = 0
+    const deadline = performance.now() + 1500
+
+    const settle = () => {
+      if (cancelled) return
       const el = bookedElRef.current
       if (!el) return
-      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       const r = el.getBoundingClientRect()
-      setPerch({ x: r.left + r.width / 2, y: r.top + 2, key: Date.now() })
-    })
-    return () => cancelAnimationFrame(raf)
+      steady = Math.abs(r.top - lastTop) < 0.5 ? steady + 1 : 0
+      lastTop = r.top
+
+      if (steady < 3 && performance.now() < deadline) {
+        raf = requestAnimationFrame(settle)
+        return
+      }
+
+      // If it still can't be fully scrolled to, put him at the nearest edge
+      // rather than somewhere nobody can see.
+      const margin = 56
+      setPerch({
+        x: Math.min(window.innerWidth - margin, Math.max(margin, r.left + r.width / 2)),
+        y: Math.min(window.innerHeight - 12, Math.max(margin, r.top + 2)),
+        key: Date.now(),
+      })
+    }
+
+    raf = requestAnimationFrame(settle)
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(raf)
+    }
   }, [justBooked])
 
   const run = () => {
