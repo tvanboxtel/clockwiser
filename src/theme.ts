@@ -51,6 +51,12 @@ export function useTheme() {
     } catch {
       // Private browsing / storage disabled — the theme still applies for this session.
     }
+    // Drop ?theme= so an explicit pick survives a reload instead of losing to the link.
+    const url = new URL(window.location.href)
+    if (url.searchParams.has('theme')) {
+      url.searchParams.delete('theme')
+      window.history.replaceState(null, '', url)
+    }
   }, [])
 
   return { theme, setTheme }
