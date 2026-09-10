@@ -3,7 +3,7 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Plugin } from 'vite'
-import { MeetingRequestSchema, buildSystemPrompt } from '../src/intent'
+import { IntentSchema, buildSystemPrompt } from '../src/intent'
 
 const readBody = (req: import('node:http').IncomingMessage): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -37,7 +37,8 @@ const readEnvFile = (dir: string): Record<string, string> => {
 }
 
 /**
- * Dev-only endpoint that parses a spoken request into a MeetingRequest.
+ * Dev-only endpoint that parses a spoken request into a meeting request or
+ * a set of scheduling preferences — Claude decides which it heard.
  *
  * It lives in the Vite dev server purely so ANTHROPIC_API_KEY stays on this
  * side of the wire — calling Anthropic from the browser would ship the key in
@@ -80,7 +81,7 @@ export const parsePlugin = (): Plugin => ({
           system: buildSystemPrompt(),
           messages: [{ role: 'user', content: transcript }],
           // Low effort keeps this fast enough to feel instant after speech.
-          output_config: { effort: 'low', format: zodOutputFormat(MeetingRequestSchema) },
+          output_config: { effort: 'low', format: zodOutputFormat(IntentSchema) },
         })
 
         if (response.stop_reason === 'refusal')

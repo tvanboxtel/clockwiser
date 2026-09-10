@@ -9,7 +9,14 @@ import {
   type OptimizeResult,
   type SlotProposal,
 } from './optimizer'
-import { parseLocally, toMeetingRequest, type ParsedRequest } from './intent'
+import {
+  applyTune,
+  describeTune,
+  parseIntentLocally,
+  toMeetingRequest,
+  type ParsedIntent,
+  type ParsedRequest,
+} from './intent'
 import { speechSupported, useSpeech } from './useSpeech'
 import { THEMES, useTheme, type ThemeId } from './theme'
 import { Frog, type Perch } from './Frog'
@@ -42,6 +49,78 @@ const EXAMPLES = [
   'I need 30 minutes with Sofia in the morning sometime in the next two weeks',
   'Book an hour with Marc and Lena next week, afternoons only',
   'Quick chat with Lena on Thursday',
+]
+
+/** The same box also takes preferences, so show people that it does. */
+const TUNE_EXAMPLES = [
+  'I want some breaks after my long meetings, help me optimize my calendar for that',
+  'Protect my mornings and get me finished by 5',
+  'Give me two-hour focus blocks, 30 minutes to breathe after anything over an hour',
+]
+
+/**
+ * The questions Optimize asks before it rearranges anything. Each one maps to
+ * a single preference, which is what keeps this honest: every answer visibly
+ * changes a constraint the optimizer has to respect.
+ */
+const QUESTIONS: Array<{
+  q: string
+  field: keyof Prefs
+  opts: Array<{ label: string; value: number | boolean }>
+}> = [
+  {
+    q: 'Breathing room after a long meeting?',
+    field: 'breakAfterLongMeetings',
+    opts: [
+      { label: 'None', value: 0 },
+      { label: '15 min', value: 15 },
+      { label: '30 min', value: 30 },
+    ],
+  },
+  {
+    q: 'A meeting is “long” from…',
+    field: 'longMeetingMinutes',
+    opts: [
+      { label: '45 min', value: 45 },
+      { label: '1 hr', value: 60 },
+      { label: '1 hr 30', value: 90 },
+    ],
+  },
+  {
+    q: 'Earliest a meeting may start',
+    field: 'noMeetingsBefore',
+    opts: [
+      { label: '9:00', value: 9 * 60 },
+      { label: '10:00', value: 10 * 60 },
+      { label: '11:00', value: 11 * 60 },
+    ],
+  },
+  {
+    q: 'Your day ends at',
+    field: 'dayEnd',
+    opts: [
+      { label: '17:00', value: 17 * 60 },
+      { label: '18:00', value: 18 * 60 },
+      { label: '19:00', value: 19 * 60 },
+    ],
+  },
+  {
+    q: 'Shortest block worth having',
+    field: 'minFocusBlock',
+    opts: [
+      { label: '1 hr', value: 60 },
+      { label: '1 hr 30', value: 90 },
+      { label: '2 hr', value: 120 },
+    ],
+  },
+  {
+    q: 'May meetings move to another day?',
+    field: 'allowDayChange',
+    opts: [
+      { label: 'Yes', value: true },
+      { label: 'No', value: false },
+    ],
+  },
 ]
 
 /** Tweens a number so the headline stat visibly climbs when you optimize. */
@@ -130,6 +209,94 @@ function Chip({ children }: { children: React.ReactNode }) {
   return <span className="rounded-md bg-hover px-2 py-0.5 text-[11px] text-body">{children}</span>
 }
 
+/**
+ * Optimizing somebody's week without asking them anything is a guess. This is
+ * the smallest set of questions whose answers actually change the result.
+ */
+function TunePanel({
+  prefs,
+  setPrefs,
+  onRun,
+  onDismiss,
+  onExample,
+  running,
+}: {
+  prefs: Prefs
+  setPrefs: (p: Prefs) => void
+  onRun: () => void
+  onDismiss: () => void
+  onExample: (text: string) => void
+  running: boolean
+}) {
+  return (
+    <div className="mt-4 rounded-2xl border border-accent/40 bg-panel p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-fg">First — how do you like your week?</h2>
+          <p className="mt-0.5 text-xs text-muted">
+            Every answer is a hard constraint, not a hint. Change one and the plan changes with it.
+          </p>
+        </div>
+        <button onClick={onDismiss} className="text-xs text-subtle transition hover:text-body">
+          Hide
+        </button>
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {QUESTIONS.map((q) => {
+          // Asking what counts as "long" is noise until breaks are switched on.
+          const moot = q.field === 'longMeetingMinutes' && prefs.breakAfterLongMeetings === 0
+          return (
+            <div key={q.field} className={`rounded-xl border border-line bg-panel-soft px-3 py-2.5 transition ${moot ? 'opacity-45' : ''}`}>
+              <div className="text-[11px] font-medium text-muted">{q.q}</div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {q.opts.map((o) => {
+                  const active = prefs[q.field] === o.value
+                  return (
+                    <button
+                      key={String(o.value)}
+                      disabled={moot}
+                      aria-pressed={active}
+                      // The field/value pairing is checked in QUESTIONS above;
+                      // the spread just can't prove it to the compiler.
+                      onClick={() => setPrefs({ ...prefs, [q.field]: o.value } as Prefs)}
+                      className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                        active ? 'bg-accent text-accent-fg' : 'bg-hover text-muted hover:text-body'
+                      }`}
+                    >
+                      {o.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          onClick={onRun}
+          disabled={running}
+          className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-fg shadow-[0_10px_22px_-8px_var(--accent-glow)] transition hover:bg-accent-hover disabled:opacity-60"
+        >
+          {running ? 'Optimizing…' : 'Optimize my weeks'}
+        </button>
+        <span className="text-[11px] text-subtle">or just say it:</span>
+        {TUNE_EXAMPLES.map((ex) => (
+          <button
+            key={ex}
+            onClick={() => onExample(ex)}
+            className="rounded-md bg-panel-soft px-2 py-1 text-[11px] text-muted transition hover:bg-hover hover:text-body"
+          >
+            “{ex.length > 46 ? `${ex.slice(0, 44)}…` : ex}”
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const { theme, setTheme } = useTheme()
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS)
@@ -151,6 +318,10 @@ export default function App() {
   const [thinking, setThinking] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [justBooked, setJustBooked] = useState<string | null>(null)
+  // Optimize asks its questions once; after that the button just runs.
+  const [tuneOpen, setTuneOpen] = useState(false)
+  const [tuned, setTuned] = useState(false)
+  const [tuneNote, setTuneNote] = useState<string | null>(null)
   const [perch, setPerch] = useState<Perch | null>(null)
   const bookedElRef = useRef<HTMLDivElement | null>(null)
 
@@ -165,15 +336,40 @@ export default function App() {
   const focusShown = useTween(current.focusTime)
   const proposedDuration = parsed ? toMeetingRequest(parsed).durationMinutes : 30
 
-  /** Parse a spoken/typed request, then rank slots for it. */
-  const findSlots = useCallback(
+  /**
+   * Optimize with an explicit set of preferences rather than whatever is in
+   * state — applying a spoken preference and re-optimizing happen in the same
+   * tick, and `prefs` wouldn't have caught up yet.
+   */
+  const run = useCallback(
+    (using: Prefs = prefs) => {
+      setRunning(true)
+      // Defer a frame so the button's pressed state paints before we block.
+      requestAnimationFrame(() => {
+        const r = optimize(baseline, using)
+        setResult(r)
+        setEvents(r.events)
+        setRunning(false)
+        setTuned(true)
+        setCheer((n) => n + 1)
+      })
+    },
+    [baseline, prefs],
+  )
+
+  /**
+   * One input, two meanings: "find me a slot" and "here's how I like my week".
+   * Claude labels which it heard; the local parser routes the same way so a
+   * missing key doesn't turn a preference into a mystery meeting.
+   */
+  const handleInput = useCallback(
     async (transcript: string) => {
       if (!transcript.trim()) return
       setThinking(true)
       setNotice(null)
       setProposals(null)
 
-      let p: ParsedRequest
+      let intent: ParsedIntent
       let src: 'claude' | 'local' = 'claude'
       try {
         const res = await fetch('/api/parse', {
@@ -181,28 +377,43 @@ export default function App() {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ transcript }),
         })
-        const payload = (await res.json()) as { parsed?: ParsedRequest; error?: string }
+        const payload = (await res.json()) as { parsed?: ParsedIntent; error?: string }
         if (!res.ok || !payload.parsed) throw new Error(payload.error ?? res.statusText)
-        p = payload.parsed
+        intent = payload.parsed
       } catch (err) {
         // Never let a missing key or a dead network take the feature down.
-        p = parseLocally(transcript)
+        intent = parseIntentLocally(transcript)
         src = 'local'
         setNotice(err instanceof Error ? err.message : String(err))
       }
 
-      setParsed(p)
       setSource(src)
+      setThinking(false)
+
+      if (intent.kind === 'tune' && intent.tune) {
+        const next = applyTune(prefs, intent.tune)
+        setPrefs(next)
+        setParsed(null)
+        // Prefer Claude's own sentence, but never trust it over the diff we
+        // actually applied — the clamps in applyTune can overrule it.
+        setTuneNote(`${intent.tune.summary?.trim() || 'Got it.'} → ${describeTune(prefs, next)}`)
+        setTuneOpen(true)
+        run(next)
+        return
+      }
+
+      const p = intent.meeting ?? parseIntentLocally(transcript).meeting!
+      setTuneNote(null)
+      setParsed(p)
       const slots = proposeSlots(events, prefs, toMeetingRequest(p), 3)
       setProposals(slots)
       if (slots.length > 0) setWeek(Math.floor(slots[0].day / 5))
-      setThinking(false)
     },
-    [events, prefs],
+    [events, prefs, run],
   )
 
   const { listening, interim, error: micError, start, stop } = useSpeech(
-    useCallback((t: string) => { setText(t); void findSlots(t) }, [findSlots]),
+    useCallback((t: string) => { setText(t); void handleInput(t) }, [handleInput]),
   )
 
   const book = (slot: SlotProposal) => {
@@ -277,18 +488,6 @@ export default function App() {
     }
   }, [justBooked])
 
-  const run = () => {
-    setRunning(true)
-    // Defer a frame so the button's pressed state paints before we block.
-    requestAnimationFrame(() => {
-      const r = optimize(baseline, prefs)
-      setResult(r)
-      setEvents(r.events)
-      setRunning(false)
-      setCheer((n) => n + 1)
-    })
-  }
-
   const reset = () => {
     setEvents(loadDemoWeek())
     setBaseline(loadDemoWeek())
@@ -296,6 +495,10 @@ export default function App() {
     setProposals(null)
     setParsed(null)
     setText('')
+    setTuneNote(null)
+    setPrefs(DEFAULT_PREFS)
+    setTuned(false)
+    setTuneOpen(false)
   }
 
   const hours: number[] = []
@@ -324,14 +527,36 @@ export default function App() {
               Reset
             </button>
             <button
-              onClick={run}
+              onClick={() => setTuneOpen((v) => !v)}
+              aria-expanded={tuneOpen}
+              className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
+                tuneOpen ? 'border-accent text-fg' : 'border-line text-body hover:bg-hover'
+              }`}
+            >
+              Preferences
+            </button>
+            <button
+              // First run asks the questions instead of guessing at them.
+              onClick={() => (tuned || tuneOpen ? run() : setTuneOpen(true))}
               disabled={running}
               className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-fg shadow-[0_10px_22px_-8px_var(--accent-glow)] transition hover:bg-accent-hover disabled:opacity-60"
             >
-              {running ? 'Optimizing…' : 'Optimize my weeks'}
+              {running ? 'Optimizing…' : tuned ? 'Optimize my weeks' : 'Optimize my weeks…'}
             </button>
           </div>
         </div>
+
+        {/* ---- how do you want the week optimized */}
+        {tuneOpen && (
+          <TunePanel
+            prefs={prefs}
+            setPrefs={setPrefs}
+            onRun={() => run()}
+            onDismiss={() => setTuneOpen(false)}
+            onExample={(ex) => { setText(ex); void handleInput(ex) }}
+            running={running}
+          />
+        )}
 
         {/* ---- ask for a meeting */}
         <div className="mt-5 rounded-2xl border border-line bg-panel p-4">
@@ -350,12 +575,12 @@ export default function App() {
             <input
               value={listening && interim ? interim : text}
               onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && void findSlots(text)}
+              onKeyDown={(e) => e.key === 'Enter' && void handleInput(text)}
               placeholder={EXAMPLES[0]}
               className="min-w-[280px] flex-1 rounded-lg border border-line bg-panel-soft px-3 py-2.5 text-sm text-fg placeholder:text-subtle focus:border-accent focus:outline-none"
             />
             <button
-              onClick={() => void findSlots(text)}
+              onClick={() => void handleInput(text)}
               disabled={thinking || !text.trim()}
               className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg transition hover:bg-accent-hover disabled:opacity-40"
             >
@@ -372,7 +597,7 @@ export default function App() {
                 {EXAMPLES.map((ex) => (
                   <button
                     key={ex}
-                    onClick={() => { setText(ex); void findSlots(ex) }}
+                    onClick={() => { setText(ex); void handleInput(ex) }}
                     className="rounded-md bg-panel-soft px-2 py-1 text-muted transition hover:bg-hover hover:text-body"
                   >
                     {ex}
@@ -385,6 +610,17 @@ export default function App() {
           {(micError || notice) && (
             <div className="mt-2 text-[11px] text-warn">
               {micError ?? `Claude unavailable (${notice}) — parsed locally instead.`}
+            </div>
+          )}
+
+          {/* a spoken preference, and what it changed */}
+          {tuneNote && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+              <span className="text-xs text-muted">Tuned:</span>
+              <Chip>{tuneNote}</Chip>
+              <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${source === 'claude' ? 'bg-accent text-accent-fg' : 'bg-warn/20 text-warn'}`}>
+                {source === 'claude' ? 'Claude' : 'local parser'}
+              </span>
             </div>
           )}
 
@@ -446,7 +682,7 @@ export default function App() {
         </div>
 
         {/* ---- stats */}
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className={`mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 ${prefs.breakAfterLongMeetings > 0 ? 'lg:grid-cols-6' : 'lg:grid-cols-5'}`}>
           <Stat
             label="Usable focus time"
             value={fmtDuration(Math.round(focusShown / 5) * 5)}
@@ -457,6 +693,14 @@ export default function App() {
           <Stat label="Dead fragments" value={String(current.fragments)} delta={before ? current.fragments - before.fragments : undefined} good="down" />
           <Stat label="Before 10:00" value={String(current.earlyMeetings)} delta={before ? current.earlyMeetings - before.earlyMeetings : undefined} good="down" />
           <Stat label="Lunch clashes" value={String(current.lunchClashes)} delta={before ? current.lunchClashes - before.lunchClashes : undefined} good="down" />
+          {prefs.breakAfterLongMeetings > 0 && (
+            <Stat
+              label="No room to breathe"
+              value={String(current.tightTurnarounds)}
+              delta={before ? current.tightTurnarounds - before.tightTurnarounds : undefined}
+              good="down"
+            />
+          )}
         </div>
 
         {/* ---- controls */}

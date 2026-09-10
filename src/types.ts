@@ -53,6 +53,10 @@ export interface Prefs {
   lunchEnd: number
   /** Minimum length of a gap that counts as usable focus time. */
   minFocusBlock: number
+  /** Minutes of breathing room owed after a long meeting. 0 disables it. */
+  breakAfterLongMeetings: number
+  /** How long a meeting has to be before it earns a break. */
+  longMeetingMinutes: number
   /** Allow moving a flexible meeting to a different weekday. */
   allowDayChange: boolean
 }
@@ -64,6 +68,8 @@ export const DEFAULT_PREFS: Prefs = {
   lunchStart: 12 * 60 + 30,
   lunchEnd: 13 * 60 + 15,
   minFocusBlock: 90,
+  breakAfterLongMeetings: 0,
+  longMeetingMinutes: 60,
   allowDayChange: true,
 }
 

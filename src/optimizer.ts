@@ -31,6 +31,36 @@ export const gapsForDay = (
   return gaps.filter((g) => g.end > g.start)
 }
 
+/**
+ * A meeting long enough that the next thing shouldn't start the second it
+ * ends. Long is a preference, not a constant — 45 minutes is a slog for some
+ * people and a warm-up for others.
+ */
+const isLong = (e: { duration: number }, prefs: Prefs) =>
+  prefs.breakAfterLongMeetings > 0 && e.duration >= prefs.longMeetingMinutes
+
+/**
+ * Would putting `slot` here leave a long meeting with no breathing room on
+ * either side of it? Checked against everyone who shares the meeting, so a
+ * back-to-back isn't quietly handed to an attendee instead of the organiser.
+ */
+const crampsABreak = (
+  slot: { start: number; end: number; duration: number },
+  neighbours: CalEvent[],
+  prefs: Prefs,
+): boolean => {
+  const gap = prefs.breakAfterLongMeetings
+  if (gap <= 0) return false
+  return neighbours.some((n) => {
+    const nEnd = n.start + n.duration
+    // Landing inside the recovery window of a long meeting.
+    if (isLong(n, prefs) && slot.start >= nEnd && slot.start < nEnd + gap) return true
+    // Or being the long meeting whose own recovery window is already taken.
+    if (isLong(slot, prefs) && n.start >= slot.end && n.start < slot.end + gap) return true
+    return false
+  })
+}
+
 export interface Metrics {
   /** Minutes sitting in gaps long enough to actually be usable. */
   focusTime: number
@@ -43,6 +73,8 @@ export interface Metrics {
   lunchClashes: number
   /** Days with zero meetings for you. */
   meetingFreeDays: number
+  /** Long meetings with something jammed against them. Always 0 when off. */
+  tightTurnarounds: number
 }
 
 export const measure = (events: CalEvent[], prefs: Prefs, person: PersonId = 'you'): Metrics => {
@@ -54,6 +86,7 @@ export const measure = (events: CalEvent[], prefs: Prefs, person: PersonId = 'yo
     earlyMeetings: 0,
     lunchClashes: 0,
     meetingFreeDays: 0,
+    tightTurnarounds: 0,
   }
 
   for (let day = 0; day < HORIZON_DAYS; day++) {
@@ -73,6 +106,13 @@ export const measure = (events: CalEvent[], prefs: Prefs, person: PersonId = 'yo
       if (e.start < prefs.noMeetingsBefore) m.earlyMeetings++
       if (overlaps({ start: e.start, end: e.start + e.duration }, { start: prefs.lunchStart, end: prefs.lunchEnd }))
         m.lunchClashes++
+      // Count the meeting that lost its recovery window, not the pair, so two
+      // things stacked after one long meeting still reads as one problem.
+      if (isLong(e, prefs)) {
+        const end = e.start + e.duration
+        if (mine.some((o) => o !== e && o.start >= end && o.start < end + prefs.breakAfterLongMeetings))
+          m.tightTurnarounds++
+      }
     }
   }
   return m
@@ -91,7 +131,11 @@ const score = (events: CalEvent[], prefs: Prefs, person: PersonId = 'you'): numb
     m.meetingFreeDays * 120 -
     m.fragments * 25 -
     m.earlyMeetings * 45 -
-    m.lunchClashes * 60
+    m.lunchClashes * 60 -
+    // Also priced in, not only forbidden: two fixed meetings can be jammed
+    // together where nothing is movable, and the optimizer should still
+    // prefer arrangements that add no more of them.
+    m.tightTurnarounds * 50
   )
 }
 
@@ -119,10 +163,11 @@ const candidateSlots = (
     const lunch = { start: prefs.lunchStart, end: prefs.lunchEnd }
 
     for (let start = earliest; start + event.duration <= prefs.dayEnd; start += SLOT) {
-      const slot = { start, end: start + event.duration }
+      const slot = { start, end: start + event.duration, duration: event.duration }
       if (overlaps(slot, lunch)) continue
-      if (!blocking.some((b) => overlaps(slot, { start: b.start, end: b.start + b.duration })))
-        out.push({ day, start })
+      if (blocking.some((b) => overlaps(slot, { start: b.start, end: b.start + b.duration }))) continue
+      if (crampsABreak(slot, blocking, prefs)) continue
+      out.push({ day, start })
     }
   }
   return out
@@ -284,12 +329,10 @@ export const proposeSlots = (
       const slot = { start, end: start + req.durationMinutes }
       if (overlaps(slot, lunch)) continue
 
-      const clash = dayEvents.some(
-        (e) =>
-          e.attendees.some((a) => people.includes(a)) &&
-          overlaps(slot, { start: e.start, end: e.start + e.duration }),
-      )
-      if (clash) continue
+      const ours = dayEvents.filter((e) => e.attendees.some((a) => people.includes(a)))
+      if (ours.some((e) => overlaps(slot, { start: e.start, end: e.start + e.duration }))) continue
+      // Booking mustn't create the very back-to-back the optimizer just removed.
+      if (crampsABreak({ ...slot, duration: req.durationMinutes }, ours, prefs)) continue
 
       const booked: CalEvent[] = [
         ...events,

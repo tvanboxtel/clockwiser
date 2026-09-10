@@ -26,7 +26,7 @@ export const DEMO_WEEK: CalEvent[] = [
   ev('Design review', 0, at(10, 30), 45, true, ['you', 'sofia']),
   ev('Sync w/ Marc', 0, at(12, 0), 30, true, ['you', 'marc'], 'oneonone'),
   ev('Acme customer call', 0, at(14, 0), 60, false, ['you', 'sofia'], 'external'),
-  ev('Sprint planning', 0, at(15, 30), 60, true, ['you', 'sofia', 'marc', 'lena']),
+  ev('Sprint planning', 0, at(15, 0), 60, true, ['you', 'sofia', 'marc', 'lena']),
   ev('Bug triage', 0, at(17, 0), 30, true, ['you', 'marc']),
 
   // ---- Tuesday
@@ -35,7 +35,7 @@ export const DEMO_WEEK: CalEvent[] = [
   ev('Roadmap sync', 1, at(11, 15), 45, true, ['you', 'lena']),
   ev('Interview: candidate', 1, at(13, 30), 60, false, ['you'], 'external'),
   ev('Infra review', 1, at(15, 30), 45, true, ['you', 'misterT']),
-  ev('Support handoff', 1, at(15, 0), 30, true, ['you', 'marc']),
+  ev('Support handoff', 1, at(14, 30), 30, true, ['you', 'marc']),
   ev('Vendor demo', 1, at(16, 30), 45, false, ['you', 'lena'], 'external'),
 
   // ---- Wednesday
@@ -52,7 +52,7 @@ export const DEMO_WEEK: CalEvent[] = [
   ev('Experiment review', 3, at(11, 30), 30, true, ['you', 'sofia']),
   ev('Onboarding buddy sync', 3, at(13, 0), 30, true, ['you', 'lena']),
   ev('Security review', 3, at(14, 30), 60, true, ['you', 'lena']),
-  ev('Investor update prep', 3, at(16, 0), 45, true, ['you', 'sofia']),
+  ev('Investor update prep', 3, at(15, 30), 45, true, ['you', 'sofia']),
 
   // ---- Friday
   ev('Standup', 4, at(9, 30), 15, false, ALL),
@@ -60,7 +60,7 @@ export const DEMO_WEEK: CalEvent[] = [
   ev('Board deck review', 4, at(12, 0), 60, false, ['you', 'sofia'], 'external'),
   ev('1:1 Marc', 4, at(14, 0), 30, true, ['you', 'marc'], 'oneonone'),
   ev('Demo Friday', 4, at(15, 0), 60, false, ALL),
-  ev('Weekly wrap', 4, at(16, 30), 30, true, ['you', 'marc']),
+  ev('Weekly wrap', 4, at(16, 0), 30, true, ['you', 'marc']),
 
   // ---- Teammate-only commitments: invisible on your calendar, but they
   // constrain where a shared meeting can legally move to.
