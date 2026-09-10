@@ -25,23 +25,28 @@ const getCtor = (): (new () => SpeechRecognitionLike) | undefined => {
 
 export const speechSupported = () => typeof window !== 'undefined' && !!getCtor()
 
-/** How long a pause may last before we decide the sentence is finished. */
-const SILENCE_MS = 3000
-/** Longer grace at the start — thinking about what to say takes a moment. */
-const FIRST_SILENCE_MS = 10_000
+/** How long a pause may last before we call the sentence finished. */
+const SILENCE_MS = 4000
 /** Hard ceiling, so a forgotten open mic can't listen forever. */
 const MAX_MS = 60_000
+
+/** Add ?micdebug to the URL to trace the recogniser in the console. */
+const debug = (...args: unknown[]) => {
+  if (typeof window !== 'undefined' && window.location.search.includes('micdebug')) {
+    console.log('[mic]', ...args)
+  }
+}
 
 /**
  * Wraps the browser's speech recognition. Chrome and Safari only — hence the
  * text input beside the mic in the UI, which is also what you want in a room
  * too loud to dictate into.
  *
- * Runs in continuous mode and decides for itself when you've stopped talking,
- * because the default single-utterance mode ends at the first natural pause —
- * far too eager for a sentence like "half an hour with Sofia and Marc… before
- * Wednesday". Chrome also ends the session on its own periodically, so we
- * restart it underneath and only surface a result once you actually stop.
+ * `continuous` is on so a natural pause mid-sentence doesn't end the take,
+ * which single-utterance mode does far too eagerly. What we deliberately do
+ * NOT do is restart the recogniser when it ends: driving start() from onend
+ * flaps the microphone and leaves it transcribing nothing at all. When the
+ * browser says it's done, we take what we heard and submit it.
  */
 export const useSpeech = (onFinal: (transcript: string) => void) => {
   const [listening, setListening] = useState(false)
@@ -68,21 +73,18 @@ export const useSpeech = (onFinal: (transcript: string) => void) => {
     doneRef.current = true
     window.clearTimeout(silenceTimer.current)
     window.clearTimeout(capTimer.current)
-    recRef.current?.stop()
+    try {
+      recRef.current?.stop()
+    } catch {
+      // Already stopped; nothing to do.
+    }
     setListening(false)
 
     const transcript = `${settledRef.current} ${liveRef.current}`.trim()
     setInterim('')
+    debug('finish ->', JSON.stringify(transcript))
     if (transcript) onFinalRef.current(transcript)
   }, [])
-
-  const armSilence = useCallback(
-    (ms: number) => {
-      window.clearTimeout(silenceTimer.current)
-      silenceTimer.current = window.setTimeout(finish, ms)
-    },
-    [finish],
-  )
 
   const start = useCallback(() => {
     const Ctor = getCtor()
@@ -111,40 +113,44 @@ export const useSpeech = (onFinal: (transcript: string) => void) => {
       }
       liveRef.current = live
       setInterim(`${settledRef.current}${live}`.trim())
-      armSilence(SILENCE_MS)
+      debug('result', { settled: settledRef.current, live })
+
+      // Restart the clock on every word, so only a real pause ends the take.
+      window.clearTimeout(silenceTimer.current)
+      silenceTimer.current = window.setTimeout(finish, SILENCE_MS)
     }
 
     rec.onerror = (e) => {
-      // A silent stretch isn't a failure here — the silence timer owns that call.
-      if (e.error === 'no-speech' || e.error === 'aborted') return
-      setError(e.error === 'not-allowed' ? 'Microphone permission denied.' : `Mic error: ${e.error}`)
+      debug('error', e.error)
+      if (e.error === 'not-allowed') setError('Microphone permission denied.')
+      else if (e.error !== 'no-speech' && e.error !== 'aborted') setError(`Mic error: ${e.error}`)
+      // Whatever went wrong, don't leave the button stuck listening.
       finish()
     }
 
-    // Chrome ends a session on its own every so often. Unless we're done,
-    // pick it straight back up so a long sentence survives.
+    // The browser deciding it's done is authoritative — submit, don't restart.
     rec.onend = () => {
-      if (doneRef.current) return
-      try {
-        rec.start()
-      } catch {
-        finish()
-      }
+      debug('end')
+      finish()
     }
 
     recRef.current = rec
     rec.start()
     setListening(true)
-    armSilence(FIRST_SILENCE_MS)
+    debug('start')
     capTimer.current = window.setTimeout(finish, MAX_MS)
-  }, [armSilence, finish])
+  }, [finish])
 
   useEffect(
     () => () => {
       window.clearTimeout(silenceTimer.current)
       window.clearTimeout(capTimer.current)
       doneRef.current = true
-      recRef.current?.stop()
+      try {
+        recRef.current?.stop()
+      } catch {
+        // Unmounting anyway.
+      }
     },
     [],
   )
