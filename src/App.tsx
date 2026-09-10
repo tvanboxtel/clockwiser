@@ -12,7 +12,7 @@ import {
 import { parseLocally, toMeetingRequest, type ParsedRequest } from './intent'
 import { speechSupported, useSpeech } from './useSpeech'
 import { THEMES, useTheme, type ThemeId } from './theme'
-import { Frog } from './Frog'
+import { Frog, type Perch } from './Frog'
 import {
   DEFAULT_PREFS,
   HORIZON,
@@ -151,6 +151,8 @@ export default function App() {
   const [thinking, setThinking] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [justBooked, setJustBooked] = useState<string | null>(null)
+  const [perch, setPerch] = useState<Perch | null>(null)
+  const bookedElRef = useRef<HTMLDivElement | null>(null)
 
   const current: Metrics = useMemo(() => measure(events, prefs), [events, prefs])
   const before = result?.before ?? null
@@ -224,8 +226,21 @@ export default function App() {
     setProposals(null)
     setParsed(null)
     setJustBooked(booked.id)
-    setTimeout(() => setJustBooked(null), 2500)
+    setTimeout(() => setJustBooked(null), 6000)
   }
+
+  // Send the frog to whatever we just booked, once it has actually painted.
+  useEffect(() => {
+    if (!justBooked) return
+    const raf = requestAnimationFrame(() => {
+      const el = bookedElRef.current
+      if (!el) return
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      const r = el.getBoundingClientRect()
+      setPerch({ x: r.left + r.width / 2, y: r.top + 2, key: Date.now() })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [justBooked])
 
   const run = () => {
     setRunning(true)
@@ -542,7 +557,8 @@ export default function App() {
                     return (
                       <div
                         key={e.id}
-                        className={`absolute left-1 overflow-hidden rounded-lg px-2 py-1 text-[11px] leading-tight backdrop-blur-sm transition-all duration-700 ease-out ${KIND_STYLE[e.kind]} ${e.flexible ? 'border-dashed' : ''} ${moved ? 'ring-2 ring-good' : ''} ${fresh ? 'z-20 ring-2 ring-accent' : ''}`}
+                        ref={fresh ? bookedElRef : undefined}
+                        className={`absolute left-1 overflow-hidden rounded-lg px-2 py-1 text-[11px] leading-tight backdrop-blur-sm transition-all duration-700 ease-out ${KIND_STYLE[e.kind]} ${e.flexible ? 'border-dashed' : ''} ${moved ? 'ring-2 ring-good' : ''} ${fresh ? 'just-booked' : ''}`}
                         style={{
                           top: y(e.start, prefs),
                           height: Math.max(20, y(e.start + e.duration, prefs) - y(e.start, prefs) - 2),
@@ -553,6 +569,7 @@ export default function App() {
                         <div className="flex items-center gap-1 font-semibold">
                           {!e.flexible && <span className="opacity-60">🔒</span>}
                           <span className="truncate">{e.title}</span>
+                          {fresh && <span className="just-booked-tag">new</span>}
                         </div>
                         {e.duration >= 30 && <div className="tabular-nums opacity-70">{fmt(e.start)}</div>}
                       </div>
@@ -575,7 +592,7 @@ export default function App() {
         </div>
       </div>
 
-      <Frog cheer={cheer} />
+      <Frog cheer={cheer} perch={perch} />
     </div>
   )
 }
